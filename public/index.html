@@ -1,0 +1,1463 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>NetSports Fantasy - NHL Playoff Hockey Pool</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <style>
+    body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .animate-spin { animation: spin 1s linear infinite; }
+    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .5; } }
+    .animate-pulse { animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="text/babel">
+const { useState, useEffect, useCallback, useMemo, createContext, useContext } = React;
+
+// ============================================================================
+// CONFIGURATION
+// ============================================================================
+const API_URL = '/api'; // Same origin - backend serves frontend
+  ? 'http://localhost:3001/api' 
+  : '/api'; // In production, serve from same domain or update this
+
+const SALARY_CAP = 30;
+const ROUND_NAMES = {1: 'First Round', 2: 'Second Round', 3: 'Conf Finals & Cup Final'};
+
+// ============================================================================
+// API CLIENT
+// ============================================================================
+const api = {
+  token: localStorage.getItem('netsports-token'),
+  
+  setToken(token) {
+    this.token = token;
+    if (token) {
+      localStorage.setItem('netsports-token', token);
+    } else {
+      localStorage.removeItem('netsports-token');
+    }
+  },
+  
+  async request(endpoint, options = {}) {
+    const headers = { 'Content-Type': 'application/json', ...options.headers };
+    if (this.token) {
+      headers['Authorization'] = `Bearer ${this.token}`;
+    }
+    
+    const response = await fetch(`${API_URL}${endpoint}`, {
+      ...options,
+      headers
+    });
+    
+    const data = await response.json();
+    
+    if (!response.ok) {
+      throw new Error(data.error || 'Request failed');
+    }
+    
+    return data;
+  },
+  
+  // Auth
+  async register(username, email, password) {
+    return this.request('/auth/register', {
+      method: 'POST',
+      body: JSON.stringify({ username, email, password })
+    });
+  },
+  
+  async verify(email, code) {
+    const data = await this.request('/auth/verify', {
+      method: 'POST',
+      body: JSON.stringify({ email, code })
+    });
+    if (data.token) this.setToken(data.token);
+    return data;
+  },
+  
+  async login(username, password) {
+    const data = await this.request('/auth/login', {
+      method: 'POST',
+      body: JSON.stringify({ username, password })
+    });
+    if (data.token) this.setToken(data.token);
+    return data;
+  },
+  
+  async getMe() {
+    return this.request('/auth/me');
+  },
+  
+  async changePassword(currentPassword, newPassword) {
+    return this.request('/auth/password', {
+      method: 'PUT',
+      body: JSON.stringify({ currentPassword, newPassword })
+    });
+  },
+  
+  logout() {
+    this.setToken(null);
+  },
+  
+  // Players
+  async getPlayers() {
+    return this.request('/players');
+  },
+  
+  // Rosters
+  async getRosters() {
+    return this.request('/rosters');
+  },
+  
+  async saveRoster(round, selections, stars, tiebreakers) {
+    return this.request(`/rosters/${round}`, {
+      method: 'PUT',
+      body: JSON.stringify({ selections, stars, tiebreakers })
+    });
+  },
+  
+  async submitRoster(round) {
+    return this.request(`/rosters/${round}/submit`, { method: 'POST' });
+  },
+  
+  // Standings
+  async getStandings() {
+    return this.request('/standings');
+  },
+  
+  async getSettings() {
+    return this.request('/standings/settings');
+  },
+  
+  async getUserStandings(userId) {
+    return this.request(`/standings/user/${userId}`);
+  },
+  
+  async getTeams() {
+    return this.request('/standings/teams');
+  },
+  
+  async refreshStats() {
+    return this.request('/standings/refresh', { method: 'POST' });
+  },
+  
+  async updateSettings(settings) {
+    return this.request('/standings/settings', {
+      method: 'PUT',
+      body: JSON.stringify(settings)
+    });
+  },
+  
+  // Groups
+  async getGroups() {
+    return this.request('/groups');
+  },
+  
+  async getGroup(id) {
+    return this.request(`/groups/${id}`);
+  },
+  
+  async createGroup(name, description, isPrivate) {
+    return this.request('/groups', {
+      method: 'POST',
+      body: JSON.stringify({ name, description, isPrivate })
+    });
+  },
+  
+  async joinGroup(code) {
+    return this.request('/groups/join', {
+      method: 'POST',
+      body: JSON.stringify({ code })
+    });
+  },
+  
+  async leaveGroup(id) {
+    return this.request(`/groups/${id}/leave`, { method: 'POST' });
+  },
+  
+  async deleteGroup(id) {
+    return this.request(`/groups/${id}`, { method: 'DELETE' });
+  },
+  
+  async updateBlast(id, message) {
+    return this.request(`/groups/${id}/blast`, {
+      method: 'PUT',
+      body: JSON.stringify({ message })
+    });
+  },
+  
+  async sendChat(groupId, message) {
+    return this.request(`/groups/${groupId}/chat`, {
+      method: 'POST',
+      body: JSON.stringify({ message })
+    });
+  }
+};
+
+// ============================================================================
+// AUTH CONTEXT
+// ============================================================================
+const AuthContext = createContext(null);
+
+function AuthProvider({ children }) {
+  const [user, setUser] = useState(null);
+  const [loading, setLoading] = useState(true);
+  
+  useEffect(() => {
+    if (api.token) {
+      api.getMe()
+        .then(data => setUser(data.user))
+        .catch(() => api.logout())
+        .finally(() => setLoading(false));
+    } else {
+      setLoading(false);
+    }
+  }, []);
+  
+  const login = async (username, password) => {
+    const data = await api.login(username, password);
+    setUser(data.user);
+    return data;
+  };
+  
+  const logout = () => {
+    api.logout();
+    setUser(null);
+  };
+  
+  return (
+    <AuthContext.Provider value={{ user, setUser, login, logout, loading }}>
+      {children}
+    </AuthContext.Provider>
+  );
+}
+
+const useAuth = () => useContext(AuthContext);
+
+// ============================================================================
+// COMPONENTS
+// ============================================================================
+const Toast = ({ message, type, onClose }) => {
+  useEffect(() => {
+    const t = setTimeout(onClose, 3000);
+    return () => clearTimeout(t);
+  }, [onClose]);
+  
+  return (
+    <div className={`fixed bottom-4 right-4 px-6 py-3 rounded-lg shadow-lg z-50 text-white font-medium ${type === 'success' ? 'bg-emerald-600' : 'bg-red-600'}`}>
+      {message}
+    </div>
+  );
+};
+
+const Modal = ({ isOpen, onClose, title, children }) => {
+  if (!isOpen) return null;
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-black/70" onClick={onClose} />
+      <div className="relative bg-slate-800 rounded-2xl shadow-2xl max-w-md w-full max-h-[90vh] overflow-hidden">
+        <div className="flex items-center justify-between p-4 border-b border-slate-700">
+          <h3 className="text-xl font-bold text-white">{title}</h3>
+          <button onClick={onClose} className="text-gray-400 hover:text-white text-2xl">&times;</button>
+        </div>
+        <div className="p-4 overflow-y-auto max-h-[calc(90vh-80px)]">{children}</div>
+      </div>
+    </div>
+  );
+};
+
+const LoadingSpinner = () => (
+  <div className="flex items-center justify-center p-8">
+    <div className="w-8 h-8 border-4 border-red-600 border-t-transparent rounded-full animate-spin"></div>
+  </div>
+);
+
+const RoundStats = ({ r1, r2, r3, total }) => (
+  <div className="grid grid-cols-4 gap-2 bg-slate-800 rounded-xl p-4">
+    <div className="text-center">
+      <div className="text-gray-400 text-xs uppercase mb-1">Round 1</div>
+      <div className="text-2xl font-black text-white">{r1}</div>
+    </div>
+    <div className="text-center">
+      <div className="text-gray-400 text-xs uppercase mb-1">Round 2</div>
+      <div className="text-2xl font-black text-white">{r2}</div>
+    </div>
+    <div className="text-center">
+      <div className="text-gray-400 text-xs uppercase mb-1">Round 3</div>
+      <div className="text-2xl font-black text-white">{r3}</div>
+    </div>
+    <div className="text-center bg-gradient-to-br from-amber-500 to-amber-600 rounded-lg p-2 -m-2 ml-0">
+      <div className="text-amber-900 text-xs uppercase mb-1">Total</div>
+      <div className="text-2xl font-black text-black">{total}</div>
+    </div>
+  </div>
+);
+
+const UpdateBanner = ({ lastUpdate, round, verified, onRefresh, isRefreshing, isAdmin }) => {
+  const fmt = d => !d ? 'Never' : new Date(d).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true });
+  
+  return (
+    <div className="bg-slate-800/50 border border-slate-700 rounded-lg px-4 py-3 text-sm">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <div className={`w-2 h-2 rounded-full ${verified ? 'bg-emerald-500' : 'bg-amber-500 animate-pulse'}`} />
+          <span className="text-gray-400">Current: <span className="text-white font-semibold">{ROUND_NAMES[round]}</span></span>
+        </div>
+        <div className="flex items-center gap-4">
+          <span className={`px-2 py-0.5 rounded text-xs font-medium ${verified ? 'bg-emerald-600/20 text-emerald-400' : 'bg-amber-600/20 text-amber-400'}`}>
+            {verified ? '✓ Verified' : '○ Pending'}
+          </span>
+          <span className="text-gray-500">Updated: {fmt(lastUpdate)}</span>
+          {isAdmin && onRefresh && (
+            <button 
+              onClick={onRefresh} 
+              disabled={isRefreshing}
+              className={`px-3 py-1 rounded text-xs font-bold ${isRefreshing ? 'bg-slate-700 text-gray-500' : 'bg-blue-600 text-white hover:bg-blue-500'}`}
+            >
+              {isRefreshing ? '⏳ Loading...' : '🔄 Refresh Stats'}
+            </button>
+          )}
+        </div>
+      </div>
+      <div className="mt-2 pt-2 border-t border-slate-700/50 text-xs text-gray-500">
+        📊 Stats from NHL API • 🔄 Auto-updates during games • ✓ Verified at noon ET
+      </div>
+    </div>
+  );
+};
+
+const PlayerCard = ({ player, isSelected, isStar, canSelect, onToggle, onToggleStar, locked }) => {
+  const isGoalie = player.position === 'goalie';
+  const stats = player.stats || { r1: {}, r2: {}, r3: {} };
+  
+  const getPts = (r) => {
+    const s = stats[`r${r}`] || {};
+    if (isGoalie) return (s.w || 0) * 2 + (s.so || 0);
+    return (s.g || 0) + (s.a || 0);
+  };
+  
+  const r1 = getPts(1), r2 = getPts(2), r3 = getPts(3);
+  const total = r1 + r2 + r3;
+  
+  return (
+    <div 
+      className={`relative p-4 rounded-xl border-2 transition-all cursor-pointer ${
+        isSelected ? 'bg-slate-700 border-red-500' : 
+        canSelect ? 'bg-slate-800/50 border-slate-600 hover:border-slate-400' : 
+        'bg-slate-900/50 border-slate-700 opacity-50 cursor-not-allowed'
+      }`}
+      onClick={() => (isSelected || canSelect) && onToggle()}
+    >
+      {isSelected && <div className="absolute -top-2 -right-2 w-6 h-6 bg-red-600 rounded-full flex items-center justify-center text-white text-xs">✓</div>}
+      {isStar && <div className="absolute -top-2 -left-2 w-6 h-6 bg-yellow-500 rounded-full flex items-center justify-center">⭐</div>}
+      
+      <div className="flex items-start justify-between mb-3">
+        <div className="flex items-center gap-3">
+          <div 
+            className="w-12 h-12 rounded-full flex items-center justify-center text-white font-bold text-sm"
+            style={{ backgroundColor: player.teamColor || '#333' }}
+          >
+            {player.name.split(' ').map(n => n[0]).join('')}
+          </div>
+          <div>
+            <div className="text-white font-semibold">{player.name}</div>
+            <div className="text-gray-400 text-sm">{player.team}</div>
+          </div>
+        </div>
+        <div className="bg-amber-500 text-black font-black text-sm px-3 py-1 rounded-lg">${player.cost}</div>
+      </div>
+      
+      <div className="grid grid-cols-4 gap-1 pt-3 border-t border-slate-600 text-xs">
+        <div className="text-center"><div className="text-gray-500">R1</div><div className="text-white font-bold">{r1}</div></div>
+        <div className="text-center"><div className="text-gray-500">R2</div><div className="text-white font-bold">{r2}</div></div>
+        <div className="text-center"><div className="text-gray-500">R3</div><div className="text-white font-bold">{r3}</div></div>
+        <div className="text-center"><div className="text-amber-400">TOT</div><div className="text-amber-400 font-bold">{total}</div></div>
+      </div>
+      
+      {isSelected && !locked && onToggleStar && (
+        <button 
+          onClick={e => { e.stopPropagation(); onToggleStar(); }}
+          className={`mt-3 w-full px-3 py-2 text-xs font-bold rounded-lg ${isStar ? 'bg-yellow-500 text-black' : 'bg-slate-600 text-gray-300 hover:bg-slate-500'}`}
+        >
+          {isStar ? '⭐ STAR PLAYER' : 'Set as Star'}
+        </button>
+      )}
+    </div>
+  );
+};
+
+// ============================================================================
+// MAIN APP
+// ============================================================================
+function App() {
+  const { user, setUser, login, logout, loading: authLoading } = useAuth();
+  const [page, setPage] = useState('home');
+  const [toast, setToast] = useState(null);
+  
+  // Auth modals
+  const [authModal, setAuthModal] = useState({ open: false, mode: 'login' });
+  const [authForm, setAuthForm] = useState({ username: '', email: '', password: '' });
+  const [authErr, setAuthErr] = useState('');
+  const [verifyStep, setVerifyStep] = useState(null);
+  const [verifyCode, setVerifyCode] = useState('');
+  const [pendingEmail, setPendingEmail] = useState('');
+  const [demoCode, setDemoCode] = useState('');
+  
+  // Data
+  const [players, setPlayers] = useState([]);
+  const [settings, setSettings] = useState({ currentRound: 2, lockDates: {}, lastUpdate: null, isVerified: false });
+  const [standings, setStandings] = useState([]);
+  const [groups, setGroups] = useState([]);
+  const [rosters, setRosters] = useState({ 1: null, 2: null, 3: null });
+  const [tiebreakers, setTiebreakers] = useState({ 1: {}, 2: {}, 3: {} });
+  
+  // UI state
+  const [pickRound, setPickRound] = useState(2);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [dataLoading, setDataLoading] = useState(true);
+  const [viewGroup, setViewGroup] = useState(null);
+  const [groupData, setGroupData] = useState(null);
+  const [accModal, setAccModal] = useState(false);
+  const [adminModal, setAdminModal] = useState(false);
+  const [createGrpModal, setCreateGrpModal] = useState(false);
+  const [joinGrpModal, setJoinGrpModal] = useState(false);
+  const [grpForm, setGrpForm] = useState({ name: '', desc: '', priv: false });
+  const [joinCode, setJoinCode] = useState('');
+  
+  // Load initial data
+  useEffect(() => {
+    Promise.all([
+      api.getPlayers().catch(() => ({ players: [] })),
+      api.getSettings().catch(() => ({ currentRound: 2, lockDates: {}, lastUpdate: null, isVerified: false })),
+      api.getStandings().catch(() => ({ standings: [] }))
+    ]).then(([playersData, settingsData, standingsData]) => {
+      setPlayers(playersData.players || []);
+      setSettings(settingsData);
+      setStandings(standingsData.standings || []);
+      setPickRound(settingsData.currentRound || 2);
+      setDataLoading(false);
+    });
+  }, []);
+  
+  // Load user data when logged in
+  useEffect(() => {
+    if (user) {
+      api.getRosters().then(data => {
+        const r = { 1: null, 2: null, 3: null };
+        const t = { 1: {}, 2: {}, 3: {} };
+        [1, 2, 3].forEach(round => {
+          if (data.rosters[round]) {
+            r[round] = data.rosters[round].selections;
+          }
+          if (data.tiebreakers[round]) {
+            t[round] = data.tiebreakers[round];
+          }
+        });
+        setRosters(r);
+        setTiebreakers(t);
+      }).catch(console.error);
+      
+      api.getGroups().then(data => setGroups(data.groups || [])).catch(console.error);
+    }
+  }, [user]);
+  
+  // Current roster for selected round
+  const currentRoster = rosters[pickRound] || { western: { forwards: [], defense: [], goalies: [] }, eastern: { forwards: [], defense: [], goalies: [] } };
+  const currentTiebreakers = tiebreakers[pickRound] || {};
+  const [stars, setStars] = useState({ forward: null, defense: null, goalie: null });
+  
+  // Calculate salary
+  const salary = useMemo(() => {
+    let total = 0;
+    Object.values(currentRoster).forEach(conf => {
+      Object.values(conf).forEach(pos => {
+        pos.forEach(id => {
+          const p = players.find(x => x.id === id);
+          if (p) total += p.cost;
+        });
+      });
+    });
+    return total;
+  }, [currentRoster, players]);
+  
+  // Check if round is locked
+  const isRoundLocked = (r) => {
+    const lockDate = settings.lockDates?.[r];
+    return lockDate ? new Date() > new Date(lockDate) : false;
+  };
+  const locked = isRoundLocked(pickRound);
+  
+  // Check roster completeness
+  const isComplete = useMemo(() => {
+    const r = currentRoster;
+    return r.western?.forwards?.length === 3 && r.western?.defense?.length === 2 && r.western?.goalies?.length === 1 &&
+           r.eastern?.forwards?.length === 3 && r.eastern?.defense?.length === 2 && r.eastern?.goalies?.length === 1 &&
+           stars.forward && stars.defense && stars.goalie;
+  }, [currentRoster, stars]);
+  
+  // Calculate user's points
+  const myPoints = useMemo(() => {
+    const entry = standings.find(s => s.id === user?.id);
+    return entry?.rounds || { r1: 0, r2: 0, r3: 0 };
+  }, [standings, user]);
+  
+  // Auth handlers
+  const handleAuth = async (e) => {
+    e.preventDefault();
+    setAuthErr('');
+    
+    try {
+      if (authModal.mode === 'register') {
+        if (!authForm.username || !authForm.email || !authForm.password) {
+          setAuthErr('All fields required');
+          return;
+        }
+        if (authForm.password.length < 6) {
+          setAuthErr('Password must be at least 6 characters');
+          return;
+        }
+        
+        const data = await api.register(authForm.username, authForm.email, authForm.password);
+        setPendingEmail(authForm.email);
+        setDemoCode(data.verificationCode || '');
+        setVerifyStep('pending');
+      } else {
+        await login(authForm.username, authForm.password);
+        setAuthModal({ open: false, mode: 'login' });
+        setAuthForm({ username: '', email: '', password: '' });
+        setToast({ message: 'Welcome back!', type: 'success' });
+      }
+    } catch (err) {
+      setAuthErr(err.message);
+    }
+  };
+  
+  const handleVerify = async () => {
+    try {
+      const data = await api.verify(pendingEmail, verifyCode);
+      setUser(data.user);
+      setVerifyStep(null);
+      setAuthModal({ open: false, mode: 'login' });
+      setAuthForm({ username: '', email: '', password: '' });
+      setToast({ message: 'Account verified!', type: 'success' });
+    } catch (err) {
+      setToast({ message: err.message, type: 'error' });
+    }
+  };
+  
+  // Roster handlers
+  const togglePlayer = (conf, pos, id) => {
+    if (locked) {
+      setToast({ message: 'Rosters are locked!', type: 'error' });
+      return;
+    }
+    
+    const current = currentRoster[conf]?.[pos] || [];
+    const isSelected = current.includes(id);
+    
+    if (isSelected) {
+      // Remove player and clear star if needed
+      if (Object.values(stars).includes(id)) {
+        const newStars = { ...stars };
+        Object.keys(newStars).forEach(k => { if (newStars[k] === id) newStars[k] = null; });
+        setStars(newStars);
+      }
+      
+      const updated = {
+        ...currentRoster,
+        [conf]: { ...currentRoster[conf], [pos]: current.filter(x => x !== id) }
+      };
+      setRosters({ ...rosters, [pickRound]: updated });
+    } else {
+      const max = pos === 'forwards' ? 3 : pos === 'defense' ? 2 : 1;
+      if (current.length >= max) return;
+      
+      const player = players.find(p => p.id === id);
+      if (salary + player.cost > SALARY_CAP) {
+        setToast({ message: 'Over budget!', type: 'error' });
+        return;
+      }
+      
+      const updated = {
+        ...currentRoster,
+        [conf]: { ...currentRoster[conf], [pos]: [...current, id] }
+      };
+      setRosters({ ...rosters, [pickRound]: updated });
+    }
+  };
+  
+  const toggleStar = (position, id) => {
+    if (locked) return;
+    setStars({ ...stars, [position]: stars[position] === id ? null : id });
+  };
+  
+  const saveRoster = async () => {
+    try {
+      await api.saveRoster(pickRound, currentRoster, stars, currentTiebreakers);
+      setToast({ message: 'Roster saved!', type: 'success' });
+    } catch (err) {
+      setToast({ message: err.message, type: 'error' });
+    }
+  };
+  
+  const submitRoster = async () => {
+    if (!isComplete) {
+      setToast({ message: 'Complete your roster first', type: 'error' });
+      return;
+    }
+    
+    try {
+      await api.saveRoster(pickRound, currentRoster, stars, currentTiebreakers);
+      await api.submitRoster(pickRound);
+      setToast({ message: 'Roster submitted!', type: 'success' });
+      
+      // Refresh standings
+      const standingsData = await api.getStandings();
+      setStandings(standingsData.standings || []);
+    } catch (err) {
+      setToast({ message: err.message, type: 'error' });
+    }
+  };
+  
+  // Group handlers
+  const createGroup = async (e) => {
+    e.preventDefault();
+    try {
+      await api.createGroup(grpForm.name, grpForm.desc, grpForm.priv);
+      setGrpForm({ name: '', desc: '', priv: false });
+      setCreateGrpModal(false);
+      const data = await api.getGroups();
+      setGroups(data.groups || []);
+      setToast({ message: 'Group created!', type: 'success' });
+    } catch (err) {
+      setToast({ message: err.message, type: 'error' });
+    }
+  };
+  
+  const joinGroup = async (e) => {
+    e.preventDefault();
+    try {
+      await api.joinGroup(joinCode);
+      setJoinCode('');
+      setJoinGrpModal(false);
+      const data = await api.getGroups();
+      setGroups(data.groups || []);
+      setToast({ message: 'Joined group!', type: 'success' });
+    } catch (err) {
+      setToast({ message: err.message, type: 'error' });
+    }
+  };
+  
+  const loadGroup = async (groupId) => {
+    try {
+      const data = await api.getGroup(groupId);
+      setGroupData(data);
+      setViewGroup(groupId);
+      setPage('grouphome');
+    } catch (err) {
+      setToast({ message: err.message, type: 'error' });
+    }
+  };
+  
+  const handleRefreshStats = async () => {
+    setIsRefreshing(true);
+    try {
+      await api.refreshStats();
+      setToast({ message: 'Stats refresh started', type: 'success' });
+      // Poll for updated settings
+      setTimeout(async () => {
+        const settingsData = await api.getSettings();
+        setSettings(settingsData);
+        const standingsData = await api.getStandings();
+        setStandings(standingsData.standings || []);
+        setIsRefreshing(false);
+      }, 5000);
+    } catch (err) {
+      setToast({ message: err.message, type: 'error' });
+      setIsRefreshing(false);
+    }
+  };
+  
+  // Loading state
+  if (authLoading || dataLoading) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 flex items-center justify-center">
+        <div className="text-center">
+          <div className="text-6xl mb-4">🏒</div>
+          <LoadingSpinner />
+          <div className="text-gray-400 mt-4">Loading NetSports Fantasy...</div>
+        </div>
+      </div>
+    );
+  }
+  
+  // Organize players by conference and position
+  const playersByConf = useMemo(() => {
+    const organized = { western: { forwards: [], defense: [], goalies: [] }, eastern: { forwards: [], defense: [], goalies: [] } };
+    players.forEach(p => {
+      const pos = p.position === 'forward' ? 'forwards' : p.position === 'defense' ? 'defense' : 'goalies';
+      if (organized[p.conference]?.[pos]) {
+        organized[p.conference][pos].push(p);
+      }
+    });
+    return organized;
+  }, [players]);
+  
+  // ============================================================================
+  // RENDER
+  // ============================================================================
+  const Nav = () => (
+    <nav className="bg-slate-900 border-b-4 border-red-600 sticky top-0 z-40">
+      <div className="max-w-7xl mx-auto px-4 flex items-center justify-between h-16">
+        <div className="flex items-center gap-2 cursor-pointer" onClick={() => setPage('home')}>
+          <span className="text-3xl">🏒</span>
+          <span className="text-white font-black text-xl">NET<span className="text-red-500">SPORTS</span></span>
+        </div>
+        
+        <div className="hidden md:flex gap-1">
+          {['home', 'rules', 'picks', 'standings', 'groups'].map(p => (
+            <button
+              key={p}
+              onClick={() => setPage(p)}
+              className={`px-4 py-2 font-bold text-sm uppercase ${page === p ? 'bg-red-600 text-white' : 'text-gray-300 hover:bg-slate-700'} rounded-t-lg`}
+            >
+              {p}
+            </button>
+          ))}
+          {user?.isAdmin && (
+            <button onClick={() => setAdminModal(true)} className="px-4 py-2 font-bold text-sm uppercase text-amber-400 hover:bg-slate-700 rounded-t-lg">
+              Admin
+            </button>
+          )}
+        </div>
+        
+        <div className="md:hidden">
+          <select value={page} onChange={e => setPage(e.target.value)} className="bg-slate-700 text-white rounded px-2 py-1">
+            {['home', 'rules', 'picks', 'standings', 'groups'].map(p => <option key={p} value={p}>{p.toUpperCase()}</option>)}
+          </select>
+        </div>
+        
+        {user ? (
+          <div className="flex items-center gap-2">
+            <button onClick={() => setAccModal(true)} className="text-white font-semibold hidden sm:block hover:text-gray-300">
+              {user.username}
+            </button>
+            <button onClick={logout} className="text-gray-400 hover:text-white text-sm">Logout</button>
+          </div>
+        ) : (
+          <>
+            <button onClick={() => setAuthModal({ open: true, mode: 'login' })} className="bg-slate-700 text-white px-4 py-2 rounded-lg font-bold">Sign In</button>
+            <button onClick={() => setAuthModal({ open: true, mode: 'register' })} className="bg-red-600 text-white px-4 py-2 rounded-lg font-bold ml-2">Sign Up</button>
+          </>
+        )}
+      </div>
+    </nav>
+  );
+  
+  const Home = () => {
+    const rank = standings.findIndex(s => s.id === user?.id) + 1 || '-';
+    
+    return (
+      <div className="max-w-7xl mx-auto px-4 py-8">
+        <UpdateBanner 
+          lastUpdate={settings.lastUpdate} 
+          round={settings.currentRound} 
+          verified={settings.isVerified}
+          onRefresh={handleRefreshStats}
+          isRefreshing={isRefreshing}
+          isAdmin={user?.isAdmin}
+        />
+        
+        {!user && (
+          <div className="bg-blue-900/50 rounded-xl p-6 my-6 border border-blue-500/30">
+            <h2 className="text-2xl font-bold text-white mb-2">Welcome to NetSports Fantasy!</h2>
+            <p className="text-gray-300 mb-4">Create an account to build your team.</p>
+            <div className="flex gap-4">
+              <button onClick={() => setAuthModal({ open: true, mode: 'register' })} className="bg-red-600 text-white px-6 py-3 rounded-lg font-bold">Get Started</button>
+              <button onClick={() => setPage('rules')} className="bg-slate-700 text-white px-6 py-3 rounded-lg font-bold">View Rules</button>
+            </div>
+          </div>
+        )}
+        
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mt-6">
+          <div className="lg:col-span-2 space-y-6">
+            <div>
+              <h3 className="text-gray-400 text-sm uppercase mb-3">Your Scoring</h3>
+              <RoundStats r1={myPoints.r1} r2={myPoints.r2} r3={myPoints.r3} total={(myPoints.r1 || 0) + (myPoints.r2 || 0) + (myPoints.r3 || 0)} />
+            </div>
+            
+            <div className="bg-slate-800 rounded-xl p-4">
+              <div className="grid grid-cols-3 gap-4">
+                <div className="bg-emerald-600 rounded-lg p-4 text-center">
+                  <div className="text-white text-3xl font-black">{rank}</div>
+                  <div className="text-emerald-200 text-xs">RANK</div>
+                </div>
+                <div className="bg-slate-600 rounded-lg p-4 text-center">
+                  <div className="text-white text-3xl font-black">{standings.length}</div>
+                  <div className="text-gray-300 text-xs">PLAYERS</div>
+                </div>
+                <div className="bg-red-600 rounded-lg p-4 text-center">
+                  <div className="text-white text-3xl font-black">{groups.length}</div>
+                  <div className="text-red-200 text-xs">GROUPS</div>
+                </div>
+              </div>
+            </div>
+          </div>
+          
+          <div className="space-y-6">
+            <div className="bg-slate-800 rounded-xl overflow-hidden">
+              <div className="bg-amber-500 px-4 py-3">
+                <span className="text-black font-bold uppercase">Top 5</span>
+              </div>
+              <div className="p-4 space-y-2">
+                {standings.slice(0, 5).map((e, i) => (
+                  <div key={e.id} className={`flex items-center justify-between rounded-lg px-3 py-2 ${e.id === user?.id ? 'bg-blue-900/30 border border-blue-500/50' : 'bg-slate-700/30'}`}>
+                    <div className="flex items-center gap-3">
+                      <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${i === 0 ? 'bg-amber-500 text-black' : i === 1 ? 'bg-gray-400 text-black' : i === 2 ? 'bg-amber-700 text-white' : 'bg-slate-600'}`}>
+                        {i + 1}
+                      </div>
+                      <span className="text-white text-sm">{e.username}</span>
+                    </div>
+                    <span className="text-amber-400 font-bold">{e.points}</span>
+                  </div>
+                ))}
+                {standings.length === 0 && <div className="text-gray-500 text-sm text-center py-4">No entries yet</div>}
+              </div>
+              <div className="px-4 pb-4">
+                <button onClick={() => setPage('standings')} className="w-full bg-slate-700 text-gray-300 py-2 rounded-lg text-sm">Full Standings</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+  
+  const Picks = () => {
+    if (!user) {
+      return (
+        <div className="max-w-2xl mx-auto px-4 py-16 text-center">
+          <div className="text-6xl mb-6">🔒</div>
+          <h2 className="text-2xl font-bold text-white mb-4">Sign In Required</h2>
+          <button onClick={() => setAuthModal({ open: true, mode: 'register' })} className="bg-red-600 text-white px-8 py-3 rounded-lg font-bold">Get Started</button>
+        </div>
+      );
+    }
+    
+    return (
+      <div className="max-w-7xl mx-auto px-4 py-8">
+        <div className="text-center mb-8">
+          <h1 className="text-4xl font-black text-white mb-2">BUILD YOUR TEAM</h1>
+          
+          <div className="flex justify-center gap-2 mb-2">
+            {[1, 2, 3].map(r => (
+              <button
+                key={r}
+                onClick={() => !isRoundLocked(r) && setPickRound(r)}
+                className={`px-4 py-2 rounded-lg font-bold text-sm ${pickRound === r ? 'bg-red-600 text-white ring-2 ring-red-400' : 'bg-slate-700 text-gray-300'} ${isRoundLocked(r) ? 'opacity-50 cursor-not-allowed' : ''}`}
+              >
+                {r === 3 ? 'Finals' : `Round ${r}`} {isRoundLocked(r) ? '🔒' : ''}
+              </button>
+            ))}
+          </div>
+          
+          <p className="text-amber-400 font-semibold mb-1">{ROUND_NAMES[pickRound]}</p>
+          <p className="text-gray-400">$30 budget (resets each round) • 3F 2D 1G per conf • Stars = 2x</p>
+        </div>
+        
+        <div className="sticky top-16 z-30 bg-slate-900/95 backdrop-blur rounded-xl p-4 mb-8 border border-slate-700">
+          <div className="flex flex-wrap items-center justify-between gap-4">
+            <div className="flex items-center gap-4">
+              <div>
+                <div className="text-gray-400 text-xs">Budget</div>
+                <div className="text-white font-bold text-xl">${salary}/${SALARY_CAP}</div>
+              </div>
+              <div className="w-32 bg-slate-700 rounded-full h-3">
+                <div className={`h-full rounded-full ${salary > SALARY_CAP ? 'bg-red-500' : 'bg-emerald-500'}`} style={{ width: `${Math.min((salary / SALARY_CAP) * 100, 100)}%` }} />
+              </div>
+            </div>
+            
+            <div className="flex gap-3 text-sm">
+              <span className={currentRoster.western?.forwards?.length + currentRoster.eastern?.forwards?.length === 6 ? 'text-emerald-400' : 'text-gray-400'}>
+                {(currentRoster.western?.forwards?.length || 0) + (currentRoster.eastern?.forwards?.length || 0)}/6F
+              </span>
+              <span className={currentRoster.western?.defense?.length + currentRoster.eastern?.defense?.length === 4 ? 'text-emerald-400' : 'text-gray-400'}>
+                {(currentRoster.western?.defense?.length || 0) + (currentRoster.eastern?.defense?.length || 0)}/4D
+              </span>
+              <span className={currentRoster.western?.goalies?.length + currentRoster.eastern?.goalies?.length === 2 ? 'text-emerald-400' : 'text-gray-400'}>
+                {(currentRoster.western?.goalies?.length || 0) + (currentRoster.eastern?.goalies?.length || 0)}/2G
+              </span>
+              <span className={stars.forward && stars.defense && stars.goalie ? 'text-yellow-400' : 'text-gray-400'}>
+                {[stars.forward, stars.defense, stars.goalie].filter(Boolean).length}/3⭐
+              </span>
+            </div>
+            
+            <div className="flex gap-2">
+              <button onClick={saveRoster} disabled={locked} className={`px-4 py-2 rounded-lg font-bold ${locked ? 'bg-slate-700 text-gray-500' : 'bg-blue-600 text-white'}`}>
+                Save
+              </button>
+              <button onClick={submitRoster} disabled={!isComplete || locked} className={`px-6 py-2 rounded-lg font-bold ${isComplete && !locked ? 'bg-emerald-600 text-white' : 'bg-slate-700 text-gray-500 cursor-not-allowed'}`}>
+                Submit
+              </button>
+            </div>
+          </div>
+        </div>
+        
+        {['western', 'eastern'].map(conf => (
+          <div key={conf} className="mb-12">
+            <h2 className="text-2xl font-black text-white uppercase mb-6">{conf} Conference</h2>
+            {['forwards', 'defense', 'goalies'].map(pos => {
+              const max = pos === 'forwards' ? 3 : pos === 'defense' ? 2 : 1;
+              const selected = currentRoster[conf]?.[pos] || [];
+              const posPlayers = playersByConf[conf]?.[pos] || [];
+              
+              return (
+                <div key={pos} className="mb-8">
+                  <div className="flex justify-between mb-4">
+                    <h3 className="text-lg font-bold text-gray-300 uppercase">{pos}</h3>
+                    <span className="text-sm text-gray-400">{selected.length}/{max}</span>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                    {posPlayers.filter(p => !p.isEliminated).map(player => {
+                      const isSel = selected.includes(player.id);
+                      const starType = pos === 'forwards' ? 'forward' : pos === 'defense' ? 'defense' : 'goalie';
+                      const isStar = stars[starType] === player.id;
+                      const canSelect = !locked && !isSel && selected.length < max && salary + player.cost <= SALARY_CAP;
+                      
+                      return (
+                        <PlayerCard
+                          key={player.id}
+                          player={player}
+                          isSelected={isSel}
+                          isStar={isStar}
+                          canSelect={canSelect}
+                          onToggle={() => togglePlayer(conf, pos, player.id)}
+                          onToggleStar={() => toggleStar(starType, player.id)}
+                          locked={locked}
+                        />
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        ))}
+      </div>
+    );
+  };
+  
+  const Standings = () => {
+    const curRound = settings.currentRound || 2;
+    
+    return (
+      <div className="max-w-7xl mx-auto px-4 py-8">
+        <h1 className="text-4xl font-black text-white text-center mb-4">STANDINGS</h1>
+        <UpdateBanner lastUpdate={settings.lastUpdate} round={curRound} verified={settings.isVerified} isAdmin={user?.isAdmin} onRefresh={handleRefreshStats} isRefreshing={isRefreshing} />
+        
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-6">
+          {/* Current Round */}
+          <div className="bg-slate-800 rounded-xl overflow-hidden">
+            <div className="bg-gradient-to-r from-blue-600 to-blue-700 px-4 py-3 flex justify-between items-center">
+              <span className="text-white font-bold uppercase">📊 {ROUND_NAMES[curRound]}</span>
+              <span className="text-blue-200 text-sm">Current Round</span>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead>
+                  <tr className="bg-slate-700">
+                    <th className="px-4 py-3 text-left text-xs font-bold text-gray-400">Rank</th>
+                    <th className="px-4 py-3 text-left text-xs font-bold text-gray-400">Player</th>
+                    <th className="px-4 py-3 text-center text-xs font-bold text-gray-400">Pts</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-700">
+                  {[...standings].sort((a, b) => (b.rounds?.[`r${curRound}`] || 0) - (a.rounds?.[`r${curRound}`] || 0)).map((e, i) => (
+                    <tr key={e.id} className={`hover:bg-slate-700/50 ${e.id === user?.id ? 'bg-blue-900/20' : ''}`}>
+                      <td className="px-4 py-3">
+                        <div className={`w-7 h-7 rounded-full flex items-center justify-center font-bold text-xs ${i === 0 ? 'bg-blue-500 text-white' : i === 1 ? 'bg-blue-400 text-white' : i === 2 ? 'bg-blue-300 text-blue-900' : 'bg-slate-600 text-white'}`}>
+                          {i + 1}
+                        </div>
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className="text-white text-sm">{e.username}</span>
+                        {e.id === user?.id && <span className="text-xs bg-blue-600 px-1.5 py-0.5 rounded ml-2">YOU</span>}
+                      </td>
+                      <td className="px-4 py-3 text-center text-blue-400 font-bold">{e.rounds?.[`r${curRound}`] || 0}</td>
+                    </tr>
+                  ))}
+                  {standings.length === 0 && <tr><td colSpan={3} className="px-4 py-8 text-center text-gray-500">No entries yet</td></tr>}
+                </tbody>
+              </table>
+            </div>
+          </div>
+          
+          {/* Overall */}
+          <div className="bg-slate-800 rounded-xl overflow-hidden">
+            <div className="bg-gradient-to-r from-amber-500 to-amber-600 px-4 py-3 flex justify-between items-center">
+              <span className="text-black font-bold uppercase">🏆 Overall</span>
+              <span className="text-amber-900 text-sm">All Rounds</span>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead>
+                  <tr className="bg-slate-700">
+                    <th className="px-4 py-3 text-left text-xs font-bold text-gray-400">Rank</th>
+                    <th className="px-4 py-3 text-left text-xs font-bold text-gray-400">Player</th>
+                    <th className="px-4 py-3 text-center text-xs font-bold text-gray-400">R1</th>
+                    <th className="px-4 py-3 text-center text-xs font-bold text-gray-400">R2</th>
+                    <th className="px-4 py-3 text-center text-xs font-bold text-gray-400">R3</th>
+                    <th className="px-4 py-3 text-center text-xs font-bold text-gray-400">Total</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-700">
+                  {standings.map((e, i) => (
+                    <tr key={e.id} className={`hover:bg-slate-700/50 ${e.id === user?.id ? 'bg-blue-900/20' : ''}`}>
+                      <td className="px-4 py-3">
+                        <div className={`w-7 h-7 rounded-full flex items-center justify-center font-bold text-xs ${i === 0 ? 'bg-amber-500 text-black' : i === 1 ? 'bg-gray-400 text-black' : i === 2 ? 'bg-amber-700 text-white' : 'bg-slate-600 text-white'}`}>
+                          {i + 1}
+                        </div>
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className="text-white text-sm">{e.username}</span>
+                        {e.id === user?.id && <span className="text-xs bg-blue-600 px-1.5 py-0.5 rounded ml-2">YOU</span>}
+                      </td>
+                      <td className="px-4 py-3 text-center text-gray-400 text-sm">{e.rounds?.r1 || 0}</td>
+                      <td className="px-4 py-3 text-center text-gray-400 text-sm">{e.rounds?.r2 || 0}</td>
+                      <td className="px-4 py-3 text-center text-gray-400 text-sm">{e.rounds?.r3 || 0}</td>
+                      <td className="px-4 py-3 text-center text-amber-400 font-bold">{e.points}</td>
+                    </tr>
+                  ))}
+                  {standings.length === 0 && <tr><td colSpan={6} className="px-4 py-8 text-center text-gray-500">No entries yet</td></tr>}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+  
+  const Groups = () => {
+    if (!user) {
+      return (
+        <div className="max-w-2xl mx-auto px-4 py-16 text-center">
+          <div className="text-6xl mb-6">👥</div>
+          <h2 className="text-2xl font-bold text-white mb-4">Sign In Required</h2>
+          <button onClick={() => setAuthModal({ open: true, mode: 'register' })} className="bg-red-600 text-white px-8 py-3 rounded-lg font-bold">Get Started</button>
+        </div>
+      );
+    }
+    
+    return (
+      <div className="max-w-7xl mx-auto px-4 py-8">
+        <h1 className="text-4xl font-black text-white text-center mb-4">GROUPS</h1>
+        <div className="flex justify-center gap-4 mb-8">
+          <button onClick={() => setCreateGrpModal(true)} className="bg-emerald-600 text-white px-6 py-3 rounded-lg font-bold">+ Create</button>
+          <button onClick={() => setJoinGrpModal(true)} className="bg-blue-600 text-white px-6 py-3 rounded-lg font-bold">🔗 Join</button>
+        </div>
+        
+        <h2 className="text-xl font-bold text-white mb-4">Your Groups</h2>
+        {groups.length === 0 ? (
+          <div className="bg-slate-800 rounded-xl p-8 text-center text-gray-400 mb-8">No groups yet</div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-8">
+            {groups.map(g => (
+              <div 
+                key={g.id} 
+                onClick={() => loadGroup(g.id)}
+                className="bg-slate-800 rounded-xl p-4 cursor-pointer hover:bg-slate-700/80 border border-slate-700"
+              >
+                <div className="flex items-start justify-between mb-3">
+                  <div className="flex items-center gap-2">
+                    <span className="text-2xl">{g.is_private ? '🔒' : '👥'}</span>
+                    <div>
+                      <div className="text-white font-bold">{g.name}</div>
+                      <div className="text-gray-400 text-xs">{g.member_count} members</div>
+                    </div>
+                  </div>
+                  {g.owner_id === user.id && <span className="text-xs bg-amber-600 text-black px-2 py-0.5 rounded font-bold">OWNER</span>}
+                </div>
+                {g.blast_message && (
+                  <div className="bg-blue-600/20 border border-blue-500/30 rounded-lg p-2 my-2 text-sm text-blue-300 truncate">
+                    📢 {g.blast_message}
+                  </div>
+                )}
+                <div className="flex items-center justify-between pt-3 border-t border-slate-700">
+                  <span className="text-gray-400 text-xs">Code: {g.code}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  };
+  
+  const GroupHome = () => {
+    const [chatMsg, setChatMsg] = useState('');
+    
+    if (!groupData) return <LoadingSpinner />;
+    
+    const { group, members, chat } = groupData;
+    const isOwner = group.owner_id === user?.id;
+    
+    const sendChat = async (e) => {
+      e.preventDefault();
+      if (!chatMsg.trim()) return;
+      
+      try {
+        const msg = await api.sendChat(group.id, chatMsg);
+        setGroupData(prev => ({ ...prev, chat: [...prev.chat, msg] }));
+        setChatMsg('');
+      } catch (err) {
+        setToast({ message: err.message, type: 'error' });
+      }
+    };
+    
+    const formatTime = ts => {
+      const d = new Date(ts);
+      const now = new Date();
+      const diff = (now - d) / 1000 / 60;
+      if (diff < 1) return 'Just now';
+      if (diff < 60) return Math.floor(diff) + 'm ago';
+      if (diff < 1440) return Math.floor(diff / 60) + 'h ago';
+      return d.toLocaleDateString();
+    };
+    
+    return (
+      <div className="max-w-7xl mx-auto px-4 py-8">
+        <div className="flex items-center gap-4 mb-6">
+          <button onClick={() => { setViewGroup(null); setPage('groups'); }} className="text-gray-400 hover:text-white text-2xl">←</button>
+          <div className="flex-1">
+            <h1 className="text-3xl font-black text-white flex items-center gap-2">
+              {group.is_private ? '🔒' : '👥'} {group.name}
+            </h1>
+            <div className="text-gray-400 text-sm">{members.length} members • Code: <span className="font-mono text-white">{group.code}</span></div>
+          </div>
+          {isOwner && <span className="bg-amber-600 text-black px-3 py-1 rounded-lg font-bold text-sm">OWNER</span>}
+        </div>
+        
+        {group.blast_message && (
+          <div className="bg-blue-600/20 border border-blue-500/30 rounded-xl p-4 mb-6">
+            <div className="flex items-start gap-3">
+              <span className="text-2xl">📢</span>
+              <div>
+                <div className="text-blue-300 font-semibold mb-1">Group Announcement</div>
+                <div className="text-white">{group.blast_message}</div>
+              </div>
+            </div>
+          </div>
+        )}
+        
+        <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
+          {/* Current Round Standings */}
+          <div className="bg-slate-800 rounded-xl overflow-hidden">
+            <div className="bg-gradient-to-r from-blue-600 to-blue-700 px-4 py-3">
+              <span className="text-white font-bold">📊 {ROUND_NAMES[settings.currentRound]}</span>
+            </div>
+            <div className="p-4">
+              <table className="w-full">
+                <tbody>
+                  {[...members].sort((a, b) => (b[`r${settings.currentRound}_points`] || 0) - (a[`r${settings.currentRound}_points`] || 0)).map((m, i) => (
+                    <tr key={m.id} className={m.id === user?.id ? 'bg-blue-900/20' : ''}>
+                      <td className="py-2">
+                        <div className={`w-6 h-6 rounded-full flex items-center justify-center font-bold text-xs ${i === 0 ? 'bg-blue-500 text-white' : 'bg-slate-600 text-white'}`}>{i + 1}</div>
+                      </td>
+                      <td className="py-2 text-white text-sm">{m.username}</td>
+                      <td className="py-2 text-right text-blue-400 font-bold">{m[`r${settings.currentRound}_points`] || 0}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+          
+          {/* Overall Standings */}
+          <div className="bg-slate-800 rounded-xl overflow-hidden">
+            <div className="bg-gradient-to-r from-amber-500 to-amber-600 px-4 py-3">
+              <span className="text-black font-bold">🏆 Overall</span>
+            </div>
+            <div className="p-4">
+              <table className="w-full">
+                <tbody>
+                  {members.map((m, i) => (
+                    <tr key={m.id} className={m.id === user?.id ? 'bg-blue-900/20' : ''}>
+                      <td className="py-2">
+                        <div className={`w-6 h-6 rounded-full flex items-center justify-center font-bold text-xs ${i === 0 ? 'bg-amber-500 text-black' : 'bg-slate-600 text-white'}`}>{m.rank || i + 1}</div>
+                      </td>
+                      <td className="py-2 text-white text-sm">{m.username}</td>
+                      <td className="py-2 text-right text-amber-400 font-bold">{m.total_points || 0}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+          
+          {/* Chat */}
+          <div className="bg-slate-800 rounded-xl overflow-hidden flex flex-col" style={{ minHeight: '400px' }}>
+            <div className="bg-gradient-to-r from-purple-600 to-purple-700 px-4 py-3">
+              <span className="text-white font-bold">💬 Group Chat</span>
+            </div>
+            <div className="flex-1 p-4 overflow-y-auto" style={{ maxHeight: '300px' }}>
+              {chat.length === 0 ? (
+                <div className="text-center text-gray-400 py-8">No messages yet</div>
+              ) : (
+                chat.map(c => (
+                  <div key={c.id} className={`mb-3 flex ${c.user_id === user?.id ? 'justify-end' : 'justify-start'}`}>
+                    <div className={`max-w-[80%] rounded-lg p-3 ${c.user_id === user?.id ? 'bg-blue-600' : 'bg-slate-700'}`}>
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className="font-semibold text-sm text-gray-300">{c.username}</span>
+                        <span className="text-gray-400 text-xs">{formatTime(c.created_at)}</span>
+                      </div>
+                      <div className="text-white">{c.message}</div>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+            <form onSubmit={sendChat} className="p-4 border-t border-slate-700">
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={chatMsg}
+                  onChange={e => setChatMsg(e.target.value)}
+                  placeholder="Type a message..."
+                  className="flex-1 bg-slate-700 border border-slate-600 rounded-lg px-4 py-2 text-white"
+                />
+                <button type="submit" className="bg-purple-600 text-white px-6 py-2 rounded-lg font-bold">Send</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      </div>
+    );
+  };
+  
+  const Rules = () => (
+    <div className="max-w-4xl mx-auto px-4 py-8">
+      <h1 className="text-4xl font-black text-white text-center mb-8">RULES & SCORING</h1>
+      <div className="space-y-6">
+        <div className="bg-slate-800 rounded-xl overflow-hidden">
+          <div className="bg-red-600 px-6 py-4"><h2 className="text-xl font-bold text-white">📋 Overview</h2></div>
+          <div className="p-6 space-y-4 text-gray-300">
+            <p>Build a NEW roster of <span className="text-white font-semibold">12 players</span> before EACH round within a <span className="text-amber-400 font-semibold">$30 salary cap</span>.</p>
+            <ul className="list-disc list-inside space-y-2 ml-4">
+              <li>Salary cap resets each round</li>
+              <li>Pick from both Western and Eastern Conferences</li>
+              <li>Designate <span className="text-yellow-400 font-semibold">⭐ Star Players</span> for 2x points</li>
+              <li>Eliminated teams' players become unavailable</li>
+            </ul>
+          </div>
+        </div>
+        
+        <div className="bg-slate-800 rounded-xl overflow-hidden">
+          <div className="bg-blue-600 px-6 py-4"><h2 className="text-xl font-bold text-white">👥 Roster Requirements</h2></div>
+          <div className="p-6">
+            <div className="grid md:grid-cols-2 gap-6">
+              <div className="bg-slate-700/50 rounded-lg p-4">
+                <h3 className="text-white font-bold mb-3 border-b border-slate-600 pb-2">Per Conference</h3>
+                <ul className="space-y-2 text-gray-300">
+                  <li className="flex justify-between"><span>Forwards</span><span className="text-white font-bold">3</span></li>
+                  <li className="flex justify-between"><span>Defensemen</span><span className="text-white font-bold">2</span></li>
+                  <li className="flex justify-between"><span>Goalie</span><span className="text-white font-bold">1</span></li>
+                </ul>
+              </div>
+              <div className="bg-slate-700/50 rounded-lg p-4">
+                <h3 className="text-white font-bold mb-3 border-b border-slate-600 pb-2">Star Players</h3>
+                <ul className="space-y-2 text-gray-300">
+                  <li>1 Star Forward</li>
+                  <li>1 Star Defenseman</li>
+                  <li>1 Star Goalie</li>
+                </ul>
+                <p className="text-yellow-400 font-bold mt-3">Stars earn 2x POINTS!</p>
+              </div>
+            </div>
+          </div>
+        </div>
+        
+        <div className="bg-slate-800 rounded-xl overflow-hidden">
+          <div className="bg-emerald-600 px-6 py-4"><h2 className="text-xl font-bold text-white">📊 Scoring</h2></div>
+          <div className="p-6">
+            <div className="grid md:grid-cols-2 gap-6">
+              <div className="bg-slate-700/50 rounded-lg p-4">
+                <h3 className="text-white font-bold mb-3">Skaters</h3>
+                <ul className="space-y-2">
+                  <li className="flex justify-between text-gray-300"><span>Goal</span><span className="bg-emerald-600 text-white px-3 py-1 rounded font-bold">1 pt</span></li>
+                  <li className="flex justify-between text-gray-300"><span>Assist</span><span className="bg-emerald-600 text-white px-3 py-1 rounded font-bold">1 pt</span></li>
+                </ul>
+              </div>
+              <div className="bg-slate-700/50 rounded-lg p-4">
+                <h3 className="text-white font-bold mb-3">Goalies</h3>
+                <ul className="space-y-2">
+                  <li className="flex justify-between text-gray-300"><span>Win</span><span className="bg-emerald-600 text-white px-3 py-1 rounded font-bold">2 pts</span></li>
+                  <li className="flex justify-between text-gray-300"><span>Shutout</span><span className="bg-emerald-600 text-white px-3 py-1 rounded font-bold">1 pt</span></li>
+                </ul>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+  
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900">
+      <Nav />
+      
+      {page === 'home' && <Home />}
+      {page === 'picks' && <Picks />}
+      {page === 'standings' && <Standings />}
+      {page === 'groups' && <Groups />}
+      {page === 'grouphome' && <GroupHome />}
+      {page === 'rules' && <Rules />}
+      
+      <footer className="bg-slate-900 border-t border-slate-800 py-6 mt-12">
+        <div className="text-center text-gray-400 text-sm">NetSports Fantasy © 2026</div>
+      </footer>
+      
+      {/* Auth Modal */}
+      <Modal isOpen={authModal.open && !verifyStep} onClose={() => setAuthModal({ open: false, mode: 'login' })} title={authModal.mode === 'login' ? 'Sign In' : 'Create Account'}>
+        <form onSubmit={handleAuth} className="space-y-4">
+          {authErr && <div className="bg-red-500/20 border border-red-500 text-red-400 px-4 py-2 rounded-lg text-sm">{authErr}</div>}
+          <div>
+            <label className="block text-gray-300 text-sm mb-1">{authModal.mode === 'login' ? 'Username or Email' : 'Username'}</label>
+            <input type="text" value={authForm.username} onChange={e => setAuthForm({ ...authForm, username: e.target.value })} className="w-full bg-slate-700 border border-slate-600 rounded-lg px-4 py-2 text-white" />
+          </div>
+          {authModal.mode === 'register' && (
+            <div>
+              <label className="block text-gray-300 text-sm mb-1">Email</label>
+              <input type="email" value={authForm.email} onChange={e => setAuthForm({ ...authForm, email: e.target.value })} className="w-full bg-slate-700 border border-slate-600 rounded-lg px-4 py-2 text-white" />
+            </div>
+          )}
+          <div>
+            <label className="block text-gray-300 text-sm mb-1">Password</label>
+            <input type="password" value={authForm.password} onChange={e => setAuthForm({ ...authForm, password: e.target.value })} className="w-full bg-slate-700 border border-slate-600 rounded-lg px-4 py-2 text-white" />
+          </div>
+          <button type="submit" className="w-full bg-red-600 text-white py-3 rounded-lg font-bold">{authModal.mode === 'login' ? 'Sign In' : 'Create Account'}</button>
+          <div className="text-center text-sm text-gray-400">
+            {authModal.mode === 'login' ? (
+              <>No account? <button type="button" onClick={() => setAuthModal({ open: true, mode: 'register' })} className="text-red-400">Sign up</button></>
+            ) : (
+              <>Have account? <button type="button" onClick={() => setAuthModal({ open: true, mode: 'login' })} className="text-red-400">Sign in</button></>
+            )}
+          </div>
+        </form>
+      </Modal>
+      
+      {/* Verify Modal */}
+      <Modal isOpen={!!verifyStep} onClose={() => {}} title="Verify Your Email">
+        <div className="space-y-4">
+          <div className="bg-blue-600/20 border border-blue-600/30 rounded-lg p-4 text-center">
+            <div className="text-4xl mb-2">📧</div>
+            <p className="text-gray-300">Verification code sent to:</p>
+            <p className="text-white font-bold">{pendingEmail}</p>
+          </div>
+          {demoCode && (
+            <div className="bg-amber-600/20 border border-amber-600/30 rounded-lg p-4">
+              <p className="text-amber-400 text-sm font-medium">⚠️ DEMO MODE</p>
+              <p className="text-gray-400 text-sm">In production, this would be emailed. Your code:</p>
+              <p className="text-white text-3xl font-mono font-bold text-center mt-2 tracking-widest">{demoCode}</p>
+            </div>
+          )}
+          <div>
+            <label className="block text-gray-300 text-sm mb-2">Enter 6-digit code</label>
+            <input type="text" value={verifyCode} onChange={e => setVerifyCode(e.target.value.replace(/\D/g, '').slice(0, 6))} className="w-full bg-slate-700 border border-slate-600 rounded-lg px-4 py-3 text-white text-center text-2xl font-mono tracking-widest" placeholder="000000" maxLength={6} />
+          </div>
+          <button onClick={handleVerify} disabled={verifyCode.length !== 6} className={`w-full py-3 rounded-lg font-bold ${verifyCode.length === 6 ? 'bg-emerald-600 text-white' : 'bg-slate-700 text-gray-500 cursor-not-allowed'}`}>Verify Email</button>
+        </div>
+      </Modal>
+      
+      {/* Create Group Modal */}
+      <Modal isOpen={createGrpModal} onClose={() => setCreateGrpModal(false)} title="Create Group">
+        <form onSubmit={createGroup} className="space-y-4">
+          <div>
+            <label className="block text-gray-300 text-sm mb-1">Group Name *</label>
+            <input type="text" value={grpForm.name} onChange={e => setGrpForm({ ...grpForm, name: e.target.value })} className="w-full bg-slate-700 border border-slate-600 rounded-lg px-4 py-2 text-white" />
+          </div>
+          <div className="flex items-center gap-3">
+            <input type="checkbox" id="priv" checked={grpForm.priv} onChange={e => setGrpForm({ ...grpForm, priv: e.target.checked })} />
+            <label htmlFor="priv" className="text-gray-300 text-sm">Private</label>
+          </div>
+          <button type="submit" className="w-full bg-emerald-600 text-white py-3 rounded-lg font-bold">Create</button>
+        </form>
+      </Modal>
+      
+      {/* Join Group Modal */}
+      <Modal isOpen={joinGrpModal} onClose={() => { setJoinGrpModal(false); setJoinCode(''); }} title="Join Group">
+        <form onSubmit={joinGroup} className="space-y-4">
+          <div>
+            <label className="block text-gray-300 text-sm mb-1">Group Code</label>
+            <input type="text" value={joinCode} onChange={e => setJoinCode(e.target.value.toUpperCase())} className="w-full bg-slate-700 border border-slate-600 rounded-lg px-4 py-2 text-white uppercase tracking-widest text-center text-lg" placeholder="ENTER CODE" maxLength={8} />
+          </div>
+          <button type="submit" disabled={!joinCode} className={`w-full py-3 rounded-lg font-bold ${joinCode ? 'bg-blue-600 text-white' : 'bg-slate-700 text-gray-500 cursor-not-allowed'}`}>Join</button>
+        </form>
+      </Modal>
+      
+      {/* Account Modal */}
+      <Modal isOpen={accModal} onClose={() => setAccModal(false)} title="Account Settings">
+        <div className="space-y-4">
+          <div className="bg-slate-700/50 rounded-lg p-4">
+            <div className="text-gray-400 text-xs uppercase mb-1">Username</div>
+            <div className="text-white font-semibold">{user?.username}</div>
+          </div>
+          <div className="bg-slate-700/50 rounded-lg p-4">
+            <div className="text-gray-400 text-xs uppercase mb-1">Email</div>
+            <div className="text-white">{user?.email}</div>
+          </div>
+        </div>
+      </Modal>
+      
+      {/* Admin Modal */}
+      <Modal isOpen={adminModal} onClose={() => setAdminModal(false)} title="Admin Panel">
+        <div className="space-y-4">
+          <div className="bg-amber-600/20 border border-amber-600/30 rounded-lg p-3">
+            <p className="text-amber-400 text-sm">⚠️ Site Admin Panel</p>
+          </div>
+          <div>
+            <label className="block text-gray-300 text-sm mb-2">Current Round</label>
+            <select 
+              value={settings.currentRound} 
+              onChange={async (e) => {
+                const newRound = parseInt(e.target.value);
+                await api.updateSettings({ currentRound: newRound });
+                setSettings({ ...settings, currentRound: newRound });
+              }}
+              className="w-full bg-slate-700 border border-slate-600 rounded-lg px-4 py-2 text-white"
+            >
+              <option value={1}>Round 1</option>
+              <option value={2}>Round 2</option>
+              <option value={3}>Conference Finals & Cup</option>
+            </select>
+          </div>
+          <button onClick={handleRefreshStats} disabled={isRefreshing} className={`w-full py-2 rounded-lg font-bold ${isRefreshing ? 'bg-slate-700 text-gray-500' : 'bg-blue-600 text-white'}`}>
+            {isRefreshing ? 'Refreshing...' : '🔄 Refresh NHL Stats'}
+          </button>
+        </div>
+      </Modal>
+      
+      {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
+    </div>
+  );
+}
+
+// ============================================================================
+// RENDER
+// ============================================================================
+ReactDOM.createRoot(document.getElementById('root')).render(
+  <AuthProvider>
+    <App />
+  </AuthProvider>
+);
+  </script>
+</body>
+</html>
