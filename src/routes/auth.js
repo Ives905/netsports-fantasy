@@ -2,6 +2,7 @@ const express = require('express');
 const bcrypt = require('bcrypt');
 const pool = require('../../config/database');
 const { generateToken, authenticateToken } = require('../middleware/auth');
+const { sendVerificationEmail } = require('../services/email');
 
 const router = express.Router();
 const SALT_ROUNDS = 10;
@@ -60,17 +61,20 @@ router.post('/register', async (req, res) => {
 
     const user = result.rows[0];
 
-    // In production, send verification email here
-    // For now, return the code (would be removed in production)
+    // Send verification email
+    const emailSent = await sendVerificationEmail(user.email, verificationCode, user.username);
+
     res.status(201).json({
-      message: 'Account created. Please verify your email.',
+      message: 'Account created. Please check your email for the verification code.',
       user: {
         id: user.id,
         username: user.username,
         email: user.email
       },
-      // Remove this in production - only for demo
-      verificationCode: process.env.NODE_ENV === 'development' ? verificationCode : undefined
+      // In development, return the code for easier testing
+      verificationCode: process.env.NODE_ENV === 'development' ? verificationCode : undefined,
+      // Indicate if email was sent successfully (for debugging)
+      emailSent: emailSent
     });
 
   } catch (error) {

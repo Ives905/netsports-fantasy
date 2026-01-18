@@ -116,6 +116,12 @@ Railway is a one-stop platform that hosts your backend, database, and frontend t
 | `NODE_ENV` | `production` | Enables production mode |
 | `ADMIN_EMAIL` | `your@email.com` | Your admin account email |
 | `NHL_SEASON` | `20252026` | Current NHL season |
+| `EMAIL_HOST` | `smtp.gmail.com` | SMTP server host (e.g., Gmail, SendGrid) |
+| `EMAIL_PORT` | `587` | SMTP port (587 for TLS, 465 for SSL) |
+| `EMAIL_USER` | `your-email@gmail.com` | Email account username |
+| `EMAIL_PASSWORD` | `your-app-password` | Email account password or app-specific password |
+| `EMAIL_FROM` | `NetSports Fantasy <noreply@yourdomain.com>` | From address (optional, defaults to EMAIL_USER) |
+| `EMAIL_SECURE` | `false` | Use SSL (true for port 465, false for 587) |
 
 **Note:** `DATABASE_URL` and `PORT` are automatically set by Railway.
 
@@ -225,11 +231,49 @@ netsports-fantasy/
 |----------|----------|-------------|
 | `DATABASE_URL` | Yes | PostgreSQL connection string (auto-set by Railway) |
 | `JWT_SECRET` | Yes | Secret key for JWT tokens |
+| `EMAIL_HOST` | Yes | SMTP server host (e.g., `smtp.gmail.com`, `smtp.sendgrid.net`) |
+| `EMAIL_USER` | Yes | Email account username |
+| `EMAIL_PASSWORD` | Yes | Email account password or app-specific password |
 | `PORT` | No | Server port (default: 3001, auto-set by Railway) |
 | `NODE_ENV` | No | `development` or `production` |
 | `ADMIN_EMAIL` | No | Email for admin account |
 | `NHL_SEASON` | No | NHL season (e.g., `20252026`) |
+| `EMAIL_PORT` | No | SMTP port (default: 587 for TLS) |
+| `EMAIL_FROM` | No | From address (defaults to EMAIL_USER) |
+| `EMAIL_SECURE` | No | Use SSL (true for port 465, false for 587) |
 | `FRONTEND_URL` | No | For CORS (not needed when serving frontend from same origin) |
+
+### Email Configuration
+
+The app requires email configuration to send verification codes. Here are settings for common providers:
+
+**Gmail:**
+```
+EMAIL_HOST=smtp.gmail.com
+EMAIL_PORT=587
+EMAIL_USER=your-email@gmail.com
+EMAIL_PASSWORD=your-app-password
+EMAIL_SECURE=false
+```
+Note: You must use an [App Password](https://support.google.com/accounts/answer/185833), not your regular Gmail password.
+
+**SendGrid:**
+```
+EMAIL_HOST=smtp.sendgrid.net
+EMAIL_PORT=587
+EMAIL_USER=apikey
+EMAIL_PASSWORD=your-sendgrid-api-key
+EMAIL_SECURE=false
+```
+
+**Outlook/Office 365:**
+```
+EMAIL_HOST=smtp-mail.outlook.com
+EMAIL_PORT=587
+EMAIL_USER=your-email@outlook.com
+EMAIL_PASSWORD=your-password
+EMAIL_SECURE=false
+```
 
 ### Lock Dates
 
