@@ -116,6 +116,12 @@ Railway is a one-stop platform that hosts your backend, database, and frontend t
 | `NODE_ENV` | `production` | Enables production mode |
 | `ADMIN_EMAIL` | `your@email.com` | Your admin account email |
 | `NHL_SEASON` | `20252026` | Current NHL season |
+| `EMAIL_HOST` | `smtp.gmail.com` | SMTP server host (e.g., Gmail, SendGrid) |
+| `EMAIL_PORT` | `587` | SMTP port (587 for TLS, 465 for SSL) |
+| `EMAIL_USER` | `your-email@gmail.com` | Email account username |
+| `EMAIL_PASSWORD` | `your-app-password` | Email account password or app-specific password |
+| `EMAIL_FROM` | `NetSports Fantasy <noreply@yourdomain.com>` | From address (optional, defaults to EMAIL_USER) |
+| `EMAIL_SECURE` | `false` | Use SSL (true for port 465, false for 587) |
 
 **Note:** `DATABASE_URL` and `PORT` are automatically set by Railway.
 
@@ -180,7 +186,13 @@ railway run npm run seed
 
 3. Register with the email you set as `ADMIN_EMAIL`
 
-4. You'll have admin access to:
+4. Check your email for the 6-digit verification code
+
+5. Enter the code to verify your account
+   - **Didn't receive the email?** Use the "Resend Code" option to request a new verification email
+   - Check your spam folder if you don't see the email
+
+6. Once verified, you'll have admin access to:
    - Change current playoff round
    - Trigger manual stat refreshes
 
@@ -225,11 +237,49 @@ netsports-fantasy/
 |----------|----------|-------------|
 | `DATABASE_URL` | Yes | PostgreSQL connection string (auto-set by Railway) |
 | `JWT_SECRET` | Yes | Secret key for JWT tokens |
+| `EMAIL_HOST` | Yes | SMTP server host (e.g., `smtp.gmail.com`, `smtp.sendgrid.net`) |
+| `EMAIL_USER` | Yes | Email account username |
+| `EMAIL_PASSWORD` | Yes | Email account password or app-specific password |
 | `PORT` | No | Server port (default: 3001, auto-set by Railway) |
 | `NODE_ENV` | No | `development` or `production` |
 | `ADMIN_EMAIL` | No | Email for admin account |
 | `NHL_SEASON` | No | NHL season (e.g., `20252026`) |
+| `EMAIL_PORT` | No | SMTP port (default: 587 for TLS) |
+| `EMAIL_FROM` | No | From address (defaults to EMAIL_USER) |
+| `EMAIL_SECURE` | No | Use SSL (true for port 465, false for 587) |
 | `FRONTEND_URL` | No | For CORS (not needed when serving frontend from same origin) |
+
+### Email Configuration
+
+The app requires email configuration to send verification codes. Here are settings for common providers:
+
+**Gmail:**
+```
+EMAIL_HOST=smtp.gmail.com
+EMAIL_PORT=587
+EMAIL_USER=your-email@gmail.com
+EMAIL_PASSWORD=your-app-password
+EMAIL_SECURE=false
+```
+Note: You must use an [App Password](https://support.google.com/accounts/answer/185833), not your regular Gmail password.
+
+**SendGrid:**
+```
+EMAIL_HOST=smtp.sendgrid.net
+EMAIL_PORT=587
+EMAIL_USER=apikey
+EMAIL_PASSWORD=your-sendgrid-api-key
+EMAIL_SECURE=false
+```
+
+**Outlook/Office 365:**
+```
+EMAIL_HOST=smtp-mail.outlook.com
+EMAIL_PORT=587
+EMAIL_USER=your-email@outlook.com
+EMAIL_PASSWORD=your-password
+EMAIL_SECURE=false
+```
 
 ### Lock Dates
 
@@ -255,6 +305,37 @@ Stats are automatically fetched from the NHL API:
 ### Manual Update
 - Admin can trigger refresh from the admin panel
 - Or run: `npm run fetch-stats`
+
+---
+
+## 🛠️ Utility Scripts
+
+### Resend Verification Emails
+
+If users registered before the email feature was implemented or didn't receive their verification email:
+
+```bash
+# Resend to a specific email address
+npm run resend-verification user@example.com
+
+# Resend to all unverified users (useful after setting up email for the first time)
+npm run resend-verification -- --all
+```
+
+This utility:
+- Generates new verification codes for unverified users
+- Updates the database with the new codes
+- Sends verification emails to the users
+- Works for users who registered before email was implemented
+
+**Usage on Railway:**
+```bash
+# Using Railway CLI
+railway run npm run resend-verification your-email@example.com
+
+# Or use Railway web shell
+npm run resend-verification your-email@example.com
+```
 
 ---
 
@@ -290,7 +371,8 @@ npm run dev
 
 ### Authentication
 - `POST /api/auth/register` - Create account
-- `POST /api/auth/verify` - Verify email
+- `POST /api/auth/verify` - Verify email with code
+- `POST /api/auth/resend-verification` - Resend verification code email
 - `POST /api/auth/login` - Login
 - `GET /api/auth/me` - Get current user
 
@@ -320,9 +402,13 @@ npm run dev
 
 - **Password Hashing** - bcrypt with salt rounds
 - **JWT Authentication** - Secure token-based auth
-- **Rate Limiting** - Prevents brute force attacks
+- **Rate Limiting** - Prevents brute force attacks and email spam
+  - General API: 100 requests per 15 minutes
+  - Auth endpoints: 10 attempts per hour
+  - Resend verification: 3 attempts per hour (prevents email spam)
 - **Input Validation** - Server-side validation
 - **CORS Protection** - Configured for your domain
+- **Email Verification** - Required before account activation
 
 ---
 
@@ -345,6 +431,16 @@ npm run dev
 ### "Invalid token" errors
 - Make sure `JWT_SECRET` is set
 - Clear browser localStorage and login again
+
+### Email verification not received
+- Check your spam/junk folder
+- Verify email configuration variables are set correctly (`EMAIL_HOST`, `EMAIL_USER`, `EMAIL_PASSWORD`)
+- Use the "Resend Code" feature to request a new verification email
+- Check Railway logs for email sending errors
+- For Gmail, ensure you're using an App Password, not your regular password
+- **For users who registered before email was implemented:**
+  - Use the resend utility: `npm run resend-verification your-email@example.com`
+  - Or resend to all unverified users: `npm run resend-verification -- --all`
 
 ### Stats not updating
 - Check the `stat_update_log` table for errors

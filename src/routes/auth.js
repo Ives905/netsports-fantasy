@@ -2,6 +2,7 @@ const express = require('express');
 const bcrypt = require('bcrypt');
 const pool = require('../../config/database');
 const { generateToken, authenticateToken } = require('../middleware/auth');
+const { sendVerificationEmail } = require('../services/email');
 
 const router = express.Router();
 const SALT_ROUNDS = 10;
@@ -60,17 +61,20 @@ router.post('/register', async (req, res) => {
 
     const user = result.rows[0];
 
-    // In production, send verification email here
-    // For now, return the code (would be removed in production)
+    // Send verification email
+    const emailSent = await sendVerificationEmail(user.email, verificationCode, user.username);
+
     res.status(201).json({
-      message: 'Account created. Please verify your email.',
+      message: 'Account created. Please check your email for the verification code.',
       user: {
         id: user.id,
         username: user.username,
         email: user.email
       },
-      // Remove this in production - only for demo
-      verificationCode: process.env.NODE_ENV === 'development' ? verificationCode : undefined
+      // In development, return the code for easier testing
+      verificationCode: process.env.NODE_ENV === 'development' ? verificationCode : undefined,
+      // Indicate if email was sent successfully (for debugging)
+      emailSent: emailSent
     });
 
   } catch (error) {
@@ -115,6 +119,66 @@ router.post('/verify', async (req, res) => {
   } catch (error) {
     console.error('Verification error:', error);
     res.status(500).json({ error: 'Verification failed' });
+  }
+});
+
+/**
+ * POST /api/auth/resend-verification
+ * Resend verification code email
+ */
+router.post('/resend-verification', async (req, res) => {
+  try {
+    const { email } = req.body;
+
+    if (!email) {
+      return res.status(400).json({ error: 'Email is required' });
+    }
+
+    // Find user by email
+    const userResult = await pool.query(`
+      SELECT id, username, email, is_verified
+      FROM users
+      WHERE LOWER(email) = LOWER($1)
+    `, [email]);
+
+    if (userResult.rows.length === 0) {
+      // Don't reveal if email exists or not for security
+      return res.json({
+        message: 'If an account exists with this email, a verification code has been sent.'
+      });
+    }
+
+    const user = userResult.rows[0];
+
+    // Check if already verified
+    if (user.is_verified) {
+      return res.status(400).json({ error: 'Email already verified' });
+    }
+
+    // Generate new verification code
+    // This works for both new users and users created before email feature was implemented
+    const verificationCode = Math.floor(100000 + Math.random() * 900000).toString();
+
+    // Update verification code in database (creates new code even if one didn't exist)
+    await pool.query(`
+      UPDATE users
+      SET verification_code = $1
+      WHERE id = $2
+    `, [verificationCode, user.id]);
+
+    // Send verification email
+    const emailSent = await sendVerificationEmail(user.email, verificationCode, user.username);
+
+    res.json({
+      message: 'Verification code has been resent. Please check your email.',
+      // In development, return the code for easier testing
+      verificationCode: process.env.NODE_ENV === 'development' ? verificationCode : undefined,
+      emailSent: emailSent
+    });
+
+  } catch (error) {
+    console.error('Resend verification error:', error);
+    res.status(500).json({ error: 'Failed to resend verification code' });
   }
 });
 

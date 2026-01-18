@@ -8,18 +8,20 @@
     "dev": "nodemon src/server.js",
     "migrate": "node migrations/run.js",
     "seed": "node src/seed.js",
-    "fetch-stats": "node src/jobs/fetchStats.js"
+    "fetch-stats": "node src/jobs/fetchStats.js",
+    "resend-verification": "node src/utils/resendVerification.js"
   },
   "dependencies": {
-    "express": "^4.18.2",
-    "cors": "^2.8.5",
-    "pg": "^8.11.3",
+    "axios": "^1.6.2",
     "bcrypt": "^5.1.1",
+    "cors": "^2.8.5",
+    "dotenv": "^16.3.1",
+    "express": "^4.18.2",
+    "express-rate-limit": "^7.1.5",
     "jsonwebtoken": "^9.0.2",
     "node-cron": "^3.0.3",
-    "axios": "^1.6.2",
-    "dotenv": "^16.3.1",
-    "express-rate-limit": "^7.1.5"
+    "nodemailer": "^7.0.12",
+    "pg": "^8.11.3"
   },
   "devDependencies": {
     "nodemon": "^3.0.2"
