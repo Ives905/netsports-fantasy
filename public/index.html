@@ -24,9 +24,7 @@ const { useState, useEffect, useCallback, useMemo, createContext, useContext } =
 // ============================================================================
 // CONFIGURATION
 // ============================================================================
-const API_URL = '/api'; // Same origin - backend serves frontend
-  ? 'http://localhost:3001/api' 
-  : '/api'; // In production, serve from same domain or update this
+const API_URL = '/api';
 
 const SALARY_CAP = 30;
 const ROUND_NAMES = {1: 'First Round', 2: 'Second Round', 3: 'Conf Finals & Cup Final'};
