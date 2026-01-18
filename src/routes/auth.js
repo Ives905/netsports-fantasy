@@ -123,6 +123,65 @@ router.post('/verify', async (req, res) => {
 });
 
 /**
+ * POST /api/auth/resend-verification
+ * Resend verification code email
+ */
+router.post('/resend-verification', async (req, res) => {
+  try {
+    const { email } = req.body;
+
+    if (!email) {
+      return res.status(400).json({ error: 'Email is required' });
+    }
+
+    // Find user by email
+    const userResult = await pool.query(`
+      SELECT id, username, email, is_verified
+      FROM users
+      WHERE LOWER(email) = LOWER($1)
+    `, [email]);
+
+    if (userResult.rows.length === 0) {
+      // Don't reveal if email exists or not for security
+      return res.json({
+        message: 'If an account exists with this email, a verification code has been sent.'
+      });
+    }
+
+    const user = userResult.rows[0];
+
+    // Check if already verified
+    if (user.is_verified) {
+      return res.status(400).json({ error: 'Email already verified' });
+    }
+
+    // Generate new verification code
+    const verificationCode = Math.floor(100000 + Math.random() * 900000).toString();
+
+    // Update verification code in database
+    await pool.query(`
+      UPDATE users
+      SET verification_code = $1
+      WHERE id = $2
+    `, [verificationCode, user.id]);
+
+    // Send verification email
+    const emailSent = await sendVerificationEmail(user.email, verificationCode, user.username);
+
+    res.json({
+      message: 'Verification code has been resent. Please check your email.',
+      // In development, return the code for easier testing
+      verificationCode: process.env.NODE_ENV === 'development' ? verificationCode : undefined,
+      emailSent: emailSent
+    });
+
+  } catch (error) {
+    console.error('Resend verification error:', error);
+    res.status(500).json({ error: 'Failed to resend verification code' });
+  }
+});
+
+/**
  * POST /api/auth/login
  * Login with username/email and password
  */

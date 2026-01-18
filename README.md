@@ -186,7 +186,13 @@ railway run npm run seed
 
 3. Register with the email you set as `ADMIN_EMAIL`
 
-4. You'll have admin access to:
+4. Check your email for the 6-digit verification code
+
+5. Enter the code to verify your account
+   - **Didn't receive the email?** Use the "Resend Code" option to request a new verification email
+   - Check your spam folder if you don't see the email
+
+6. Once verified, you'll have admin access to:
    - Change current playoff round
    - Trigger manual stat refreshes
 
@@ -334,7 +340,8 @@ npm run dev
 
 ### Authentication
 - `POST /api/auth/register` - Create account
-- `POST /api/auth/verify` - Verify email
+- `POST /api/auth/verify` - Verify email with code
+- `POST /api/auth/resend-verification` - Resend verification code email
 - `POST /api/auth/login` - Login
 - `GET /api/auth/me` - Get current user
 
@@ -364,9 +371,13 @@ npm run dev
 
 - **Password Hashing** - bcrypt with salt rounds
 - **JWT Authentication** - Secure token-based auth
-- **Rate Limiting** - Prevents brute force attacks
+- **Rate Limiting** - Prevents brute force attacks and email spam
+  - General API: 100 requests per 15 minutes
+  - Auth endpoints: 10 attempts per hour
+  - Resend verification: 3 attempts per hour (prevents email spam)
 - **Input Validation** - Server-side validation
 - **CORS Protection** - Configured for your domain
+- **Email Verification** - Required before account activation
 
 ---
 
@@ -389,6 +400,13 @@ npm run dev
 ### "Invalid token" errors
 - Make sure `JWT_SECRET` is set
 - Clear browser localStorage and login again
+
+### Email verification not received
+- Check your spam/junk folder
+- Verify email configuration variables are set correctly (`EMAIL_HOST`, `EMAIL_USER`, `EMAIL_PASSWORD`)
+- Use the "Resend Code" feature to request a new verification email
+- Check Railway logs for email sending errors
+- For Gmail, ensure you're using an App Password, not your regular password
 
 ### Stats not updating
 - Check the `stat_update_log` table for errors

@@ -43,6 +43,15 @@ const authLimiter = rateLimit({
 });
 app.use('/api/auth/login', authLimiter);
 app.use('/api/auth/register', authLimiter);
+app.use('/api/auth/verify', authLimiter);
+
+// Very strict rate limit for resend verification to prevent email spam
+const resendLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000, // 1 hour
+  max: 3, // Only 3 resend attempts per hour
+  message: { error: 'Too many resend attempts. Please wait before trying again.' }
+});
+app.use('/api/auth/resend-verification', resendLimiter);
 
 // Health check
 app.get('/health', (req, res) => {
