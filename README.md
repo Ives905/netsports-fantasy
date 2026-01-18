@@ -308,6 +308,37 @@ Stats are automatically fetched from the NHL API:
 
 ---
 
+## 🛠️ Utility Scripts
+
+### Resend Verification Emails
+
+If users registered before the email feature was implemented or didn't receive their verification email:
+
+```bash
+# Resend to a specific email address
+npm run resend-verification user@example.com
+
+# Resend to all unverified users (useful after setting up email for the first time)
+npm run resend-verification -- --all
+```
+
+This utility:
+- Generates new verification codes for unverified users
+- Updates the database with the new codes
+- Sends verification emails to the users
+- Works for users who registered before email was implemented
+
+**Usage on Railway:**
+```bash
+# Using Railway CLI
+railway run npm run resend-verification your-email@example.com
+
+# Or use Railway web shell
+npm run resend-verification your-email@example.com
+```
+
+---
+
 ## 🔧 Local Development
 
 ```bash
@@ -407,6 +438,9 @@ npm run dev
 - Use the "Resend Code" feature to request a new verification email
 - Check Railway logs for email sending errors
 - For Gmail, ensure you're using an App Password, not your regular password
+- **For users who registered before email was implemented:**
+  - Use the resend utility: `npm run resend-verification your-email@example.com`
+  - Or resend to all unverified users: `npm run resend-verification -- --all`
 
 ### Stats not updating
 - Check the `stat_update_log` table for errors

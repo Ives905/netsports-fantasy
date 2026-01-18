@@ -8,7 +8,8 @@
     "dev": "nodemon src/server.js",
     "migrate": "node migrations/run.js",
     "seed": "node src/seed.js",
-    "fetch-stats": "node src/jobs/fetchStats.js"
+    "fetch-stats": "node src/jobs/fetchStats.js",
+    "resend-verification": "node src/utils/resendVerification.js"
   },
   "dependencies": {
     "axios": "^1.6.2",

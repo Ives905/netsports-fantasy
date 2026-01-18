@@ -156,9 +156,10 @@ router.post('/resend-verification', async (req, res) => {
     }
 
     // Generate new verification code
+    // This works for both new users and users created before email feature was implemented
     const verificationCode = Math.floor(100000 + Math.random() * 900000).toString();
 
-    // Update verification code in database
+    // Update verification code in database (creates new code even if one didn't exist)
     await pool.query(`
       UPDATE users
       SET verification_code = $1
