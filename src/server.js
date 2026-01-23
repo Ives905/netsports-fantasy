@@ -144,6 +144,89 @@ app.get('/api/migrate', async (req, res) => {
   }
 });
 
+// ONE-TIME TEAMS MIGRATION ENDPOINT
+// Visit this URL once to add all 32 NHL teams to the database
+// Example: https://your-app.railway.app/api/migrate-teams
+app.get('/api/migrate-teams', async (req, res) => {
+  const pool = require('../config/database');
+  
+  try {
+    console.log('🔄 Adding all 32 NHL teams...');
+    
+    const teams = [
+      // Eastern - Atlantic
+      { abbrev: 'BOS', name: 'Boston Bruins', conference: 'eastern', color: '#FFB81C' },
+      { abbrev: 'BUF', name: 'Buffalo Sabres', conference: 'eastern', color: '#002654' },
+      { abbrev: 'DET', name: 'Detroit Red Wings', conference: 'eastern', color: '#CE1126' },
+      { abbrev: 'FLA', name: 'Florida Panthers', conference: 'eastern', color: '#041E42' },
+      { abbrev: 'MTL', name: 'Montreal Canadiens', conference: 'eastern', color: '#AF1E2D' },
+      { abbrev: 'OTT', name: 'Ottawa Senators', conference: 'eastern', color: '#C52032' },
+      { abbrev: 'TBL', name: 'Tampa Bay Lightning', conference: 'eastern', color: '#002868' },
+      { abbrev: 'TOR', name: 'Toronto Maple Leafs', conference: 'eastern', color: '#00205B' },
+      // Eastern - Metropolitan
+      { abbrev: 'CAR', name: 'Carolina Hurricanes', conference: 'eastern', color: '#CE1126' },
+      { abbrev: 'CBJ', name: 'Columbus Blue Jackets', conference: 'eastern', color: '#002654' },
+      { abbrev: 'NJD', name: 'New Jersey Devils', conference: 'eastern', color: '#CE1126' },
+      { abbrev: 'NYI', name: 'New York Islanders', conference: 'eastern', color: '#00539B' },
+      { abbrev: 'NYR', name: 'New York Rangers', conference: 'eastern', color: '#0038A8' },
+      { abbrev: 'PHI', name: 'Philadelphia Flyers', conference: 'eastern', color: '#F74902' },
+      { abbrev: 'PIT', name: 'Pittsburgh Penguins', conference: 'eastern', color: '#000000' },
+      { abbrev: 'WSH', name: 'Washington Capitals', conference: 'eastern', color: '#041E42' },
+      // Western - Central
+      { abbrev: 'ARI', name: 'Arizona Coyotes', conference: 'western', color: '#8C2633' },
+      { abbrev: 'CHI', name: 'Chicago Blackhawks', conference: 'western', color: '#CF0A2C' },
+      { abbrev: 'COL', name: 'Colorado Avalanche', conference: 'western', color: '#6F263D' },
+      { abbrev: 'DAL', name: 'Dallas Stars', conference: 'western', color: '#006847' },
+      { abbrev: 'MIN', name: 'Minnesota Wild', conference: 'western', color: '#154734' },
+      { abbrev: 'NSH', name: 'Nashville Predators', conference: 'western', color: '#FFB81C' },
+      { abbrev: 'STL', name: 'St. Louis Blues', conference: 'western', color: '#002F87' },
+      { abbrev: 'WPG', name: 'Winnipeg Jets', conference: 'western', color: '#041E42' },
+      // Western - Pacific
+      { abbrev: 'ANA', name: 'Anaheim Ducks', conference: 'western', color: '#F47A38' },
+      { abbrev: 'CGY', name: 'Calgary Flames', conference: 'western', color: '#C8102E' },
+      { abbrev: 'EDM', name: 'Edmonton Oilers', conference: 'western', color: '#041E42' },
+      { abbrev: 'LAK', name: 'Los Angeles Kings', conference: 'western', color: '#111111' },
+      { abbrev: 'SJS', name: 'San Jose Sharks', conference: 'western', color: '#006D75' },
+      { abbrev: 'SEA', name: 'Seattle Kraken', conference: 'western', color: '#001628' },
+      { abbrev: 'VAN', name: 'Vancouver Canucks', conference: 'western', color: '#00205B' },
+      { abbrev: 'VGK', name: 'Vegas Golden Knights', conference: 'western', color: '#B4975A' }
+    ];
+
+    let added = 0;
+    let existing = 0;
+
+    for (const team of teams) {
+      try {
+        await pool.query(`
+          INSERT INTO teams (abbrev, name, conference, color)
+          VALUES ($1, $2, $3, $4)
+          ON CONFLICT (abbrev) DO UPDATE SET
+            color = EXCLUDED.color
+        `, [team.abbrev, team.name, team.conference, team.color]);
+        added++;
+      } catch (err) {
+        existing++;
+      }
+    }
+
+    console.log(`✓ Teams migration complete: ${added} added/updated, ${existing} already existed`);
+
+    res.json({ 
+      success: true, 
+      message: `All 32 NHL teams are now in the database! ${added} teams added/updated.`,
+      teams_processed: teams.length
+    });
+    
+  } catch (error) {
+    console.error('Teams migration error:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: error.message,
+      hint: 'Check server logs for details'
+    });
+  }
+});
+
 // API Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/players', playersRoutes);
