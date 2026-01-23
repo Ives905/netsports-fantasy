@@ -1,5 +1,6 @@
+// routes/rosters.js - Updated to use rounds table for lock dates
 const express = require('express');
-const pool = require('../../config/database');
+const pool = require('../config/database');
 const { authenticateToken } = require('../middleware/auth');
 
 const router = express.Router();
@@ -109,12 +110,16 @@ router.put('/:round', authenticateToken, async (req, res) => {
       return res.status(400).json({ error: 'Invalid round' });
     }
 
-    // Check if round is locked
+    // Check if round is locked using rounds table
     const lockResult = await pool.query(`
-      SELECT value FROM settings WHERE key = 'lock_dates'
-    `);
-    const lockDates = JSON.parse(lockResult.rows[0].value);
-    const lockDate = new Date(lockDates[round]);
+      SELECT pick_deadline FROM rounds WHERE round_number = $1
+    `, [round]);
+    
+    if (lockResult.rows.length === 0 || !lockResult.rows[0].pick_deadline) {
+      return res.status(400).json({ error: 'Pick deadline not set for this round' });
+    }
+
+    const lockDate = new Date(lockResult.rows[0].pick_deadline);
     
     if (new Date() > lockDate) {
       return res.status(403).json({ error: 'This round is locked' });
@@ -160,6 +165,25 @@ router.put('/:round', authenticateToken, async (req, res) => {
         await client.query('ROLLBACK');
         return res.status(400).json({ error: 'Roster exceeds salary cap' });
       }
+
+      // Validate players are from qualified teams for this round
+      const qualifiedResult = await client.query(`
+        SELECT COUNT(*) as invalid_count
+        FROM players p
+        WHERE p.id = ANY($1)
+        AND p.team_abbrev NOT IN (
+          SELECT team_abbrev 
+          FROM team_qualifications 
+          WHERE round_number = $2 AND qualified = true
+        )
+      `, [playerIds, round]);
+
+      if (qualifiedResult.rows[0].invalid_count > 0) {
+        await client.query('ROLLBACK');
+        return res.status(400).json({ 
+          error: 'Roster contains players from teams not qualified for this round' 
+        });
+      }
     }
 
     // Insert roster players
@@ -203,12 +227,16 @@ router.post('/:round/submit', authenticateToken, async (req, res) => {
   try {
     const round = parseInt(req.params.round);
 
-    // Check if locked
+    // Check if locked using rounds table
     const lockResult = await pool.query(`
-      SELECT value FROM settings WHERE key = 'lock_dates'
-    `);
-    const lockDates = JSON.parse(lockResult.rows[0].value);
-    const lockDate = new Date(lockDates[round]);
+      SELECT pick_deadline FROM rounds WHERE round_number = $1
+    `, [round]);
+    
+    if (lockResult.rows.length === 0 || !lockResult.rows[0].pick_deadline) {
+      return res.status(400).json({ error: 'Pick deadline not set for this round' });
+    }
+
+    const lockDate = new Date(lockResult.rows[0].pick_deadline);
     
     if (new Date() > lockDate) {
       return res.status(403).json({ error: 'This round is locked' });
