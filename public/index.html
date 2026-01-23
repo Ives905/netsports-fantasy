@@ -25,7 +25,7 @@ const { useState, useEffect, useCallback, useMemo, createContext, useContext } =
 
 const API_URL = '/api';
 const SALARY_CAP = 30;
-const ROUND_NAMES = {1: 'First Round', 2: 'Second Round', 3: 'Conf Finals & Cup Final'};
+const ROUND_NAMES = {0: 'Testing Round', 1: 'First Round', 2: 'Second Round', 3: 'Conf Finals & Cup Final'};
 
 const TIEBREAKER_QUESTIONS = {
   1: [
@@ -66,6 +66,12 @@ const api = {
     const data = await this.request('/auth/verify', { method: 'POST', body: JSON.stringify({ email, code }) });
     if (data.token) this.setToken(data.token);
     return data;
+  },
+  async requestPasswordReset(email) {
+    return this.request('/auth/request-reset', { method: 'POST', body: JSON.stringify({ email }) });
+  },
+  async resetPassword(email, token, newPassword) {
+    return this.request('/auth/reset-password', { method: 'POST', body: JSON.stringify({ email, token, newPassword }) });
   },
   async login(username, password) {
     const data = await this.request('/auth/login', { method: 'POST', body: JSON.stringify({ username, password }) });
@@ -379,10 +385,11 @@ function AppContent() {
   const [authModal, setAuthModal] = useState({ open: false, mode: 'login' });
   const [authForm, setAuthForm] = useState({ username: '', email: '', password: '' });
   const [authErr, setAuthErr] = useState('');
-  const [verifyStep, setVerifyStep] = useState(null);
-  const [verifyCode, setVerifyCode] = useState('');
-  const [pendingEmail, setPendingEmail] = useState('');
-  const [demoCode, setDemoCode] = useState('');
+  const [forgotPasswordModal, setForgotPasswordModal] = useState(false);
+  const [resetEmail, setResetEmail] = useState('');
+  const [resetToken, setResetToken] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [resetStep, setResetStep] = useState('email'); // 'email', 'token', 'password'
   const [players, setPlayers] = useState([]);
   const [settings, setSettings] = useState({ currentRound: 1, lockDates: {}, lastUpdate: null, isVerified: false });
   const [standings, setStandings] = useState([]);
@@ -578,9 +585,11 @@ function AppContent() {
         if (!authForm.username || !authForm.email || !authForm.password) { setAuthErr('All fields required'); return; }
         if (authForm.password.length < 6) { setAuthErr('Password must be at least 6 characters'); return; }
         const data = await api.register(authForm.username, authForm.email, authForm.password);
-        setPendingEmail(authForm.email);
-        setDemoCode(data.verificationCode || '');
-        setVerifyStep('pending');
+        // Auto-login after registration (no verification needed)
+        setUser(data.user);
+        setAuthModal({ open: false, mode: 'login' });
+        setAuthForm({ username: '', email: '', password: '' });
+        setToast({ message: 'Account created! Welcome!', type: 'success' });
       } else {
         await login(authForm.username, authForm.password);
         setAuthModal({ open: false, mode: 'login' });
@@ -590,14 +599,26 @@ function AppContent() {
     } catch (err) { setAuthErr(err.message); }
   };
 
-  const handleVerify = async () => {
+  const handleForgotPassword = async () => {
     try {
-      const data = await api.verify(pendingEmail, verifyCode);
-      setUser(data.user);
-      setVerifyStep(null);
-      setAuthModal({ open: false, mode: 'login' });
-      setAuthForm({ username: '', email: '', password: '' });
-      setToast({ message: 'Account verified!', type: 'success' });
+      if (resetStep === 'email') {
+        if (!resetEmail) { setToast({ message: 'Please enter your email', type: 'error' }); return; }
+        await api.requestPasswordReset(resetEmail);
+        setResetStep('token');
+        setToast({ message: 'Reset code sent to your email!', type: 'success' });
+      } else if (resetStep === 'token') {
+        if (!resetToken) { setToast({ message: 'Please enter the reset code', type: 'error' }); return; }
+        setResetStep('password');
+      } else if (resetStep === 'password') {
+        if (!newPassword || newPassword.length < 6) { setToast({ message: 'Password must be at least 6 characters', type: 'error' }); return; }
+        await api.resetPassword(resetEmail, resetToken, newPassword);
+        setForgotPasswordModal(false);
+        setResetEmail('');
+        setResetToken('');
+        setNewPassword('');
+        setResetStep('email');
+        setToast({ message: 'Password reset successfully! You can now login.', type: 'success' });
+      }
     } catch (err) { setToast({ message: err.message, type: 'error' }); }
   };
 
@@ -1058,23 +1079,45 @@ function AppContent() {
       {page === 'rules' && <Rules />}
       <footer className="bg-slate-900 border-t border-slate-800 py-6 mt-12"><div className="text-center text-gray-400 text-sm">NetSports Fantasy © 2026</div></footer>
 
-      <Modal isOpen={authModal.open && !verifyStep} onClose={() => setAuthModal({ open: false, mode: 'login' })} title={authModal.mode === 'login' ? 'Sign In' : 'Create Account'}>
+      <Modal isOpen={authModal.open} onClose={() => setAuthModal({ open: false, mode: 'login' })} title={authModal.mode === 'login' ? 'Sign In' : 'Create Account'}>
         <form onSubmit={handleAuth} className="space-y-4">
           {authErr && <div className="bg-red-500/20 border border-red-500 text-red-400 px-4 py-2 rounded-lg text-sm">{authErr}</div>}
           <div><label className="block text-gray-300 text-sm mb-1">{authModal.mode === 'login' ? 'Username or Email' : 'Username'}</label><input type="text" value={authForm.username} onChange={e => setAuthForm({ ...authForm, username: e.target.value })} className="w-full bg-slate-700 border border-slate-600 rounded-lg px-4 py-2 text-white" /></div>
           {authModal.mode === 'register' && <div><label className="block text-gray-300 text-sm mb-1">Email</label><input type="email" value={authForm.email} onChange={e => setAuthForm({ ...authForm, email: e.target.value })} className="w-full bg-slate-700 border border-slate-600 rounded-lg px-4 py-2 text-white" /></div>}
           <div><label className="block text-gray-300 text-sm mb-1">Password</label><input type="password" value={authForm.password} onChange={e => setAuthForm({ ...authForm, password: e.target.value })} className="w-full bg-slate-700 border border-slate-600 rounded-lg px-4 py-2 text-white" /></div>
+          {authModal.mode === 'login' && (
+            <div className="text-right">
+              <button type="button" onClick={() => { setAuthModal({ open: false, mode: 'login' }); setForgotPasswordModal(true); }} className="text-sm text-blue-400 hover:text-blue-300">Forgot password?</button>
+            </div>
+          )}
           <button type="submit" className="w-full bg-red-600 text-white py-3 rounded-lg font-bold">{authModal.mode === 'login' ? 'Sign In' : 'Create Account'}</button>
           <div className="text-center text-sm text-gray-400">{authModal.mode === 'login' ? <>No account? <button type="button" onClick={() => setAuthModal({ open: true, mode: 'register' })} className="text-red-400">Sign up</button></> : <>Have account? <button type="button" onClick={() => setAuthModal({ open: true, mode: 'login' })} className="text-red-400">Sign in</button></>}</div>
         </form>
       </Modal>
 
-      <Modal isOpen={!!verifyStep} onClose={() => {}} title="Verify Your Email">
+      <Modal isOpen={forgotPasswordModal} onClose={() => { setForgotPasswordModal(false); setResetStep('email'); setResetEmail(''); setResetToken(''); setNewPassword(''); }} title="Reset Password">
         <div className="space-y-4">
-          <div className="bg-blue-600/20 border border-blue-600/30 rounded-lg p-4 text-center"><p className="text-gray-300">Code sent to: <span className="text-white font-bold">{pendingEmail}</span></p></div>
-          {demoCode && <div className="bg-amber-600/20 border border-amber-600/30 rounded-lg p-4"><p className="text-amber-400 text-sm">DEMO: Your code is <span className="text-white font-mono font-bold">{demoCode}</span></p></div>}
-          <input type="text" value={verifyCode} onChange={e => setVerifyCode(e.target.value.replace(/\D/g, '').slice(0, 6))} className="w-full bg-slate-700 border border-slate-600 rounded-lg px-4 py-3 text-white text-center text-2xl font-mono" placeholder="000000" maxLength={6} />
-          <button onClick={handleVerify} disabled={verifyCode.length !== 6} className={`w-full py-3 rounded-lg font-bold ${verifyCode.length === 6 ? 'bg-emerald-600 text-white' : 'bg-slate-700 text-gray-500'}`}>Verify</button>
+          {resetStep === 'email' && (
+            <>
+              <p className="text-gray-300 text-sm">Enter your email address and we'll send you a reset code.</p>
+              <input type="email" value={resetEmail} onChange={e => setResetEmail(e.target.value)} placeholder="your@email.com" className="w-full bg-slate-700 border border-slate-600 rounded-lg px-4 py-2 text-white" />
+              <button onClick={handleForgotPassword} className="w-full bg-blue-600 text-white py-3 rounded-lg font-bold">Send Reset Code</button>
+            </>
+          )}
+          {resetStep === 'token' && (
+            <>
+              <p className="text-gray-300 text-sm">Enter the 6-digit code sent to <span className="text-white font-semibold">{resetEmail}</span></p>
+              <input type="text" value={resetToken} onChange={e => setResetToken(e.target.value.replace(/\D/g, '').slice(0, 6))} placeholder="000000" maxLength={6} className="w-full bg-slate-700 border border-slate-600 rounded-lg px-4 py-3 text-white text-center text-2xl font-mono" />
+              <button onClick={handleForgotPassword} disabled={resetToken.length !== 6} className={`w-full py-3 rounded-lg font-bold ${resetToken.length === 6 ? 'bg-blue-600 text-white' : 'bg-slate-700 text-gray-500'}`}>Verify Code</button>
+            </>
+          )}
+          {resetStep === 'password' && (
+            <>
+              <p className="text-gray-300 text-sm">Enter your new password</p>
+              <input type="password" value={newPassword} onChange={e => setNewPassword(e.target.value)} placeholder="New password" className="w-full bg-slate-700 border border-slate-600 rounded-lg px-4 py-2 text-white" />
+              <button onClick={handleForgotPassword} className="w-full bg-emerald-600 text-white py-3 rounded-lg font-bold">Reset Password</button>
+            </>
+          )}
         </div>
       </Modal>
 
@@ -1142,6 +1185,7 @@ function AppContent() {
                     setSettings({ ...settings, currentRound: r }); 
                   }} 
                   className="w-full bg-slate-700 border border-slate-600 rounded-lg px-4 py-2 text-white">
+                  <option value={0}>Testing Round</option>
                   <option value={1}>Round 1</option>
                   <option value={2}>Round 2</option>
                   <option value={3}>Conference Finals & Cup</option>
@@ -1158,13 +1202,16 @@ function AppContent() {
 
           {adminTab === 'deadlines' && (
             <div className="space-y-4">
-              <p className="text-gray-400 text-sm">Set pick deadlines and scoring end dates for each round.</p>
-              {[1, 2, 3].map(roundNum => (
+              <p className="text-gray-400 text-sm">Set pick deadlines and scoring end dates for each round. All times are in Eastern Standard Time (EST).</p>
+              {[0, 1, 2, 3].map(roundNum => (
                 <div key={roundNum} className="bg-slate-700/50 rounded-lg p-4">
-                  <div className="text-white font-semibold mb-3">{ROUND_NAMES[roundNum]}</div>
+                  <div className="text-white font-semibold mb-3">
+                    {ROUND_NAMES[roundNum]}
+                    {roundNum === 0 && <span className="ml-2 text-xs bg-amber-600 px-2 py-1 rounded">TESTING ONLY</span>}
+                  </div>
                   
                   <div className="mb-3">
-                    <label className="block text-gray-300 text-xs mb-1">Pick Deadline</label>
+                    <label className="block text-gray-300 text-xs mb-1">Pick Deadline (EST)</label>
                     <div className="flex gap-2">
                       <input 
                         type="datetime-local"
@@ -1180,13 +1227,13 @@ function AppContent() {
                     </div>
                     {adminRounds.find(r => r.round_number === roundNum)?.pick_deadline && (
                       <div className="text-gray-400 text-xs mt-1">
-                        Current: {new Date(adminRounds.find(r => r.round_number === roundNum).pick_deadline).toLocaleString()}
+                        Current: {new Date(adminRounds.find(r => r.round_number === roundNum).pick_deadline).toLocaleString('en-US', { timeZone: 'America/New_York' })} EST
                       </div>
                     )}
                   </div>
 
                   <div>
-                    <label className="block text-gray-300 text-xs mb-1">Scoring End Date</label>
+                    <label className="block text-gray-300 text-xs mb-1">Scoring End Date (EST)</label>
                     <div className="flex gap-2">
                       <input 
                         type="datetime-local"
@@ -1202,7 +1249,7 @@ function AppContent() {
                     </div>
                     {adminRounds.find(r => r.round_number === roundNum)?.end_date && (
                       <div className="text-gray-400 text-xs mt-1">
-                        Current: {new Date(adminRounds.find(r => r.round_number === roundNum).end_date).toLocaleString()}
+                        Current: {new Date(adminRounds.find(r => r.round_number === roundNum).end_date).toLocaleString('en-US', { timeZone: 'America/New_York' })} EST
                       </div>
                     )}
                   </div>
@@ -1214,45 +1261,109 @@ function AppContent() {
           {adminTab === 'teams' && (
             <div className="space-y-4">
               <p className="text-gray-400 text-sm">Select which teams qualify for each round.</p>
-              {[1, 2, 3].map(roundNum => (
-                <div key={roundNum} className="bg-slate-700/50 rounded-lg p-4">
-                  <div className="flex items-center justify-between mb-3">
-                    <div className="text-white font-semibold">{ROUND_NAMES[roundNum]}</div>
-                    <div className="text-gray-400 text-xs">
-                      {(selectedTeams[roundNum] || []).length} teams selected
+              {[0, 1, 2, 3].map(roundNum => {
+                const maxTeams = roundNum === 0 ? 32 : roundNum === 1 ? 16 : roundNum === 2 ? 8 : 4;
+                const selectedCount = (selectedTeams[roundNum] || []).length;
+                const easternTeams = adminTeams.filter(t => t.conference === 'eastern');
+                const westernTeams = adminTeams.filter(t => t.conference === 'western');
+                
+                return (
+                  <div key={roundNum} className="bg-slate-700/50 rounded-lg p-4">
+                    <div className="flex items-center justify-between mb-3">
+                      <div className="text-white font-semibold">
+                        {ROUND_NAMES[roundNum]}
+                        {roundNum === 0 && <span className="ml-2 text-xs bg-amber-600 px-2 py-1 rounded">TESTING</span>}
+                      </div>
+                      <div className={`text-xs font-semibold ${selectedCount > maxTeams ? 'text-red-400' : selectedCount === maxTeams ? 'text-emerald-400' : 'text-gray-400'}`}>
+                        {selectedCount} / {maxTeams} teams
+                      </div>
                     </div>
+                    
+                    <div className="space-y-3 max-h-80 overflow-y-auto p-2">
+                      {/* Western Conference */}
+                      <div>
+                        <div className="text-amber-400 text-xs font-bold mb-2 uppercase tracking-wide">🌟 Western Conference</div>
+                        <div className="grid grid-cols-4 gap-2 bg-slate-800/30 p-2 rounded">
+                          {westernTeams.map(team => {
+                            const isSelected = (selectedTeams[roundNum] || []).includes(team.abbrev);
+                            return (
+                              <button
+                                key={team.abbrev}
+                                onClick={() => toggleTeamSelection(roundNum, team.abbrev)}
+                                className={`flex flex-col items-center justify-center p-2 rounded transition-all ${
+                                  isSelected 
+                                    ? 'bg-blue-600 text-white ring-2 ring-blue-400' 
+                                    : 'bg-slate-600 text-gray-300 hover:bg-slate-500'
+                                }`}
+                                title={team.name}>
+                                <img 
+                                  src={`https://assets.nhle.com/logos/nhl/svg/${team.abbrev}_light.svg`}
+                                  alt={team.abbrev}
+                                  className="w-8 h-8 mb-1"
+                                  onError={e => e.target.style.display = 'none'}
+                                />
+                                <span className="text-xs font-bold">{team.abbrev}</span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                      
+                      {/* Eastern Conference */}
+                      <div>
+                        <div className="text-blue-400 text-xs font-bold mb-2 uppercase tracking-wide">🌟 Eastern Conference</div>
+                        <div className="grid grid-cols-4 gap-2 bg-slate-800/30 p-2 rounded">
+                          {easternTeams.map(team => {
+                            const isSelected = (selectedTeams[roundNum] || []).includes(team.abbrev);
+                            return (
+                              <button
+                                key={team.abbrev}
+                                onClick={() => toggleTeamSelection(roundNum, team.abbrev)}
+                                className={`flex flex-col items-center justify-center p-2 rounded transition-all ${
+                                  isSelected 
+                                    ? 'bg-blue-600 text-white ring-2 ring-blue-400' 
+                                    : 'bg-slate-600 text-gray-300 hover:bg-slate-500'
+                                }`}
+                                title={team.name}>
+                                <img 
+                                  src={`https://assets.nhle.com/logos/nhl/svg/${team.abbrev}_light.svg`}
+                                  alt={team.abbrev}
+                                  className="w-8 h-8 mb-1"
+                                  onError={e => e.target.style.display = 'none'}
+                                />
+                                <span className="text-xs font-bold">{team.abbrev}</span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    </div>
+
+                    {selectedCount > maxTeams && (
+                      <div className="bg-red-500/20 border border-red-500 rounded p-2 mt-3 text-center">
+                        <p className="text-red-400 text-xs font-semibold">⚠️ Too many teams! Remove {selectedCount - maxTeams}</p>
+                      </div>
+                    )}
+
+                    {selectedCount < maxTeams && selectedCount > 0 && (
+                      <div className="bg-amber-500/20 border border-amber-500 rounded p-2 mt-3 text-center">
+                        <p className="text-amber-400 text-xs font-semibold">Select {maxTeams - selectedCount} more team{maxTeams - selectedCount > 1 ? 's' : ''}</p>
+                      </div>
+                    )}
+                    
+                    <button 
+                      onClick={() => handleUpdateQualifiedTeams(roundNum)}
+                      disabled={selectedCount !== maxTeams}
+                      className={`w-full mt-3 py-2 rounded font-bold text-sm transition-colors ${
+                        selectedCount === maxTeams
+                          ? 'bg-emerald-600 hover:bg-emerald-500 text-white' 
+                          : 'bg-slate-700 text-gray-500 cursor-not-allowed'
+                      }`}>
+                      {selectedCount === maxTeams ? '✓ Save Qualified Teams' : `Select exactly ${maxTeams} teams`}
+                    </button>
                   </div>
-                  <div className="grid grid-cols-4 gap-2 max-h-64 overflow-y-auto mb-3 p-2">
-                    {adminTeams.map(team => {
-                      const isSelected = (selectedTeams[roundNum] || []).includes(team.abbrev);
-                      return (
-                        <button
-                          key={team.abbrev}
-                          onClick={() => toggleTeamSelection(roundNum, team.abbrev)}
-                          className={`flex flex-col items-center justify-center p-2 rounded transition-all ${
-                            isSelected 
-                              ? 'bg-blue-600 text-white ring-2 ring-blue-400' 
-                              : 'bg-slate-600 text-gray-300 hover:bg-slate-500'
-                          }`}
-                          title={team.name}>
-                          <img 
-                            src={`https://assets.nhle.com/logos/nhl/svg/${team.abbrev}_light.svg`}
-                            alt={team.abbrev}
-                            className="w-8 h-8 mb-1"
-                            onError={e => e.target.style.display = 'none'}
-                          />
-                          <span className="text-xs font-bold">{team.abbrev}</span>
-                        </button>
-                      );
-                    })}
-                  </div>
-                  <button 
-                    onClick={() => handleUpdateQualifiedTeams(roundNum)}
-                    className="w-full bg-emerald-600 hover:bg-emerald-500 text-white py-2 rounded font-bold text-sm">
-                    Save Qualified Teams
-                  </button>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>
