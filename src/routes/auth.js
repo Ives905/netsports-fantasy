@@ -8,7 +8,7 @@ const SALT_ROUNDS = 10;
 
 /**
  * POST /api/auth/register
- * Create new user account
+ * Create new user account (auto-verified, no email confirmation)
  */
 router.post('/register', async (req, res) => {
   try {
@@ -48,61 +48,18 @@ router.post('/register', async (req, res) => {
     // Hash password
     const passwordHash = await bcrypt.hash(password, SALT_ROUNDS);
 
-    // Generate verification code
-    const verificationCode = Math.floor(100000 + Math.random() * 900000).toString();
-
-    // Create user
+    // Create user (auto-verified)
     const result = await pool.query(`
-      INSERT INTO users (username, email, password_hash, verification_code, is_admin)
-      VALUES ($1, $2, $3, $4, $5)
+      INSERT INTO users (username, email, password_hash, is_verified, is_admin)
+      VALUES ($1, $2, $3, true, $4)
       RETURNING id, username, email, is_verified, is_admin, created_at
-    `, [username, email.toLowerCase(), passwordHash, verificationCode, email.toLowerCase() === process.env.ADMIN_EMAIL?.toLowerCase()]);
-
-    const user = result.rows[0];
-
-    // In production, send verification email here
-    // For now, return the code (would be removed in production)
-    res.status(201).json({
-      message: 'Account created. Please verify your email.',
-      user: {
-        id: user.id,
-        username: user.username,
-        email: user.email
-      },
-      // Remove this in production - only for demo
-      verificationCode: process.env.NODE_ENV === 'development' ? verificationCode : undefined
-    });
-
-  } catch (error) {
-    console.error('Registration error:', error);
-    res.status(500).json({ error: 'Failed to create account' });
-  }
-});
-
-/**
- * POST /api/auth/verify
- * Verify email with code
- */
-router.post('/verify', async (req, res) => {
-  try {
-    const { email, code } = req.body;
-
-    const result = await pool.query(`
-      UPDATE users 
-      SET is_verified = true, verification_code = null
-      WHERE LOWER(email) = LOWER($1) AND verification_code = $2
-      RETURNING id, username, email, is_verified, is_admin
-    `, [email, code]);
-
-    if (result.rows.length === 0) {
-      return res.status(400).json({ error: 'Invalid verification code' });
-    }
+    `, [username, email.toLowerCase(), passwordHash, email.toLowerCase() === process.env.ADMIN_EMAIL?.toLowerCase()]);
 
     const user = result.rows[0];
     const token = generateToken(user);
 
-    res.json({
-      message: 'Email verified successfully',
+    res.status(201).json({
+      message: 'Account created successfully!',
       token,
       user: {
         id: user.id,
@@ -113,8 +70,100 @@ router.post('/verify', async (req, res) => {
     });
 
   } catch (error) {
-    console.error('Verification error:', error);
-    res.status(500).json({ error: 'Verification failed' });
+    console.error('Registration error:', error);
+    res.status(500).json({ error: 'Failed to create account' });
+  }
+});
+
+/**
+ * POST /api/auth/request-reset
+ * Request password reset (sends email with 6-digit code)
+ */
+router.post('/request-reset', async (req, res) => {
+  try {
+    const { email } = req.body;
+
+    if (!email) {
+      return res.status(400).json({ error: 'Email is required' });
+    }
+
+    // Check if user exists
+    const userResult = await pool.query(
+      'SELECT id, email FROM users WHERE LOWER(email) = LOWER($1)',
+      [email]
+    );
+
+    if (userResult.rows.length === 0) {
+      // Don't reveal if email exists for security
+      return res.json({ message: 'If that email exists, a reset code has been sent.' });
+    }
+
+    // Generate 6-digit code
+    const resetToken = Math.floor(100000 + Math.random() * 900000).toString();
+
+    // Store reset token
+    await pool.query(`
+      UPDATE users 
+      SET verification_code = $1, updated_at = NOW()
+      WHERE LOWER(email) = LOWER($2)
+    `, [resetToken, email]);
+
+    // In production, send email here
+    console.log(`Password reset code for ${email}: ${resetToken}`);
+
+    res.json({ 
+      message: 'Reset code sent to your email.',
+      // Remove this in production - only for demo
+      resetToken: process.env.NODE_ENV === 'development' ? resetToken : undefined
+    });
+
+  } catch (error) {
+    console.error('Password reset request error:', error);
+    res.status(500).json({ error: 'Failed to process reset request' });
+  }
+});
+
+/**
+ * POST /api/auth/reset-password
+ * Reset password with token
+ */
+router.post('/reset-password', async (req, res) => {
+  try {
+    const { email, token, newPassword } = req.body;
+
+    if (!email || !token || !newPassword) {
+      return res.status(400).json({ error: 'Email, token, and new password are required' });
+    }
+
+    if (newPassword.length < 6) {
+      return res.status(400).json({ error: 'Password must be at least 6 characters' });
+    }
+
+    // Verify token
+    const userResult = await pool.query(
+      'SELECT id FROM users WHERE LOWER(email) = LOWER($1) AND verification_code = $2',
+      [email, token]
+    );
+
+    if (userResult.rows.length === 0) {
+      return res.status(400).json({ error: 'Invalid or expired reset code' });
+    }
+
+    // Hash new password
+    const passwordHash = await bcrypt.hash(newPassword, SALT_ROUNDS);
+
+    // Update password and clear verification code
+    await pool.query(`
+      UPDATE users 
+      SET password_hash = $1, verification_code = NULL, updated_at = NOW()
+      WHERE id = $2
+    `, [passwordHash, userResult.rows[0].id]);
+
+    res.json({ message: 'Password reset successfully! You can now login.' });
+
+  } catch (error) {
+    console.error('Password reset error:', error);
+    res.status(500).json({ error: 'Failed to reset password' });
   }
 });
 
@@ -147,11 +196,6 @@ router.post('/login', async (req, res) => {
     const validPassword = await bcrypt.compare(password, user.password_hash);
     if (!validPassword) {
       return res.status(401).json({ error: 'Invalid credentials' });
-    }
-
-    // Check if verified
-    if (!user.is_verified) {
-      return res.status(403).json({ error: 'Please verify your email first' });
     }
 
     // Generate token
