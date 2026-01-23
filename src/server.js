@@ -193,7 +193,9 @@ app.get('/api/fix-rounds', async (req, res) => {
     `);
     
     for (const row of constraintCheck.rows) {
-      await pool.query(`ALTER TABLE settings DROP CONSTRAINT IF EXISTS ${row.constraint_name}`);
+      // Properly quote the constraint name to handle special characters
+      const quotedName = `"${row.constraint_name}"`;
+      await pool.query(`ALTER TABLE settings DROP CONSTRAINT IF EXISTS ${quotedName}`);
       console.log(`✓ Dropped settings constraint: ${row.constraint_name}`);
     }
     
