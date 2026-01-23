@@ -42,7 +42,7 @@ const TIEBREAKER_QUESTIONS = {
   ]
 };
 
-const getPlayerHeadshot = (nhlId) => `https://assets.nhle.com/mugs/nhl/20242025/${nhlId}.png`;
+const getPlayerHeadshot = (nhlId) => `https://assets.nhle.com/mugs/nhl/20252026/${nhlId}.png`;
 
 const api = {
   token: localStorage.getItem('netsports-token'),
@@ -391,7 +391,7 @@ function AppContent() {
   const [newPassword, setNewPassword] = useState('');
   const [resetStep, setResetStep] = useState('email'); // 'email', 'token', 'password'
   const [players, setPlayers] = useState([]);
-  const [settings, setSettings] = useState({ currentRound: 1, lockDates: {}, lastUpdate: null, isVerified: false });
+  const [settings, setSettings] = useState({ currentRound: 0, lockDates: {}, lastUpdate: null, isVerified: false });
   const [standings, setStandings] = useState([]);
   const [groups, setGroups] = useState([]);
   const [rosters, setRosters] = useState({ 1: null, 2: null, 3: null });
@@ -715,6 +715,7 @@ function AppContent() {
   const handleRefreshStats = async () => {
     setIsRefreshing(true);
     try {
+      console.log('Refreshing stats...');
       await api.refreshStats();
       setToast({ message: 'Stats refresh started', type: 'success' });
       setTimeout(async () => {
@@ -724,7 +725,11 @@ function AppContent() {
         setStandings(standingsData.standings || []);
         setIsRefreshing(false);
       }, 5000);
-    } catch (err) { setToast({ message: err.message, type: 'error' }); setIsRefreshing(false); }
+    } catch (err) { 
+      console.error('Stats refresh error:', err);
+      setToast({ message: err.message || 'Failed to refresh stats', type: 'error' }); 
+      setIsRefreshing(false); 
+    }
   };
 
   const filterPlayers = (playerList) => {
