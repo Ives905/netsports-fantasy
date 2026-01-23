@@ -75,8 +75,8 @@ router.put('/settings', authenticateToken, verifyAdmin, async (req, res) => {
   try {
     const { currentRound } = req.body;
 
-    if (currentRound < 1 || currentRound > 3) {
-      return res.status(400).json({ error: 'Invalid round number' });
+    if (currentRound < 0 || currentRound > 3) {
+      return res.status(400).json({ error: 'Invalid round number (must be 0-3)' });
     }
 
     await pool.query(`
