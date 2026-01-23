@@ -308,8 +308,8 @@ app.use('/api/auth', authRoutes);
 app.use('/api/players', playersRoutes);
 app.use('/api/rosters', rostersRoutes);
 app.use('/api/groups', groupsRoutes);
-app.use('/api/admin', adminRoutes); // NEW: Admin routes
-app.use('/api', standingsRoutes);
+app.use('/api/admin', adminRoutes); // Admin routes
+app.use('/api/standings', standingsRoutes); // Standings routes
 
 // Error handling
 app.use((err, req, res, next) => {
