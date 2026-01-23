@@ -14,6 +14,8 @@
     .animate-spin { animation: spin 1s linear infinite; }
     @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .5; } }
     .animate-pulse { animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
+    @keyframes countdown-pulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.02); } }
+    .countdown-pulse { animation: countdown-pulse 2s ease-in-out infinite; }
   </style>
 </head>
 <body>
@@ -22,30 +24,41 @@
 const { useState, useEffect, useCallback, useMemo, createContext, useContext } = React;
 
 const API_URL = '/api';
-
 const SALARY_CAP = 30;
 const ROUND_NAMES = {1: 'First Round', 2: 'Second Round', 3: 'Conf Finals & Cup Final'};
 
-// API Client
+const TIEBREAKER_QUESTIONS = {
+  1: [
+    "How many total games will be played in Round 1 of the playoffs (all series combined)?",
+    "What will be the highest number of goals scored by one team in a single Round 1 game?"
+  ],
+  2: [
+    "How many total games will be played in Round 2 of the playoffs (all series combined)?",
+    "How many overtime games will there be in Round 2?"
+  ],
+  3: [
+    "How many total games will be played in the Conference Finals and Stanley Cup Final combined?",
+    "What will be the total number of goals scored in the Stanley Cup Final series?"
+  ]
+};
+
+const getPlayerHeadshot = (nhlId) => \`https://cms.nhl.bamgrid.com/images/headshots/current/168x168/\${nhlId}.jpg\`;
+
 const api = {
   token: localStorage.getItem('netsports-token'),
-  
   setToken(token) {
     this.token = token;
     if (token) localStorage.setItem('netsports-token', token);
     else localStorage.removeItem('netsports-token');
   },
-  
   async request(endpoint, options = {}) {
     const headers = { 'Content-Type': 'application/json', ...options.headers };
-    if (this.token) headers['Authorization'] = `Bearer ${this.token}`;
-    
-    const response = await fetch(`${API_URL}${endpoint}`, { ...options, headers });
+    if (this.token) headers['Authorization'] = \`Bearer \${this.token}\`;
+    const response = await fetch(\`\${API_URL}\${endpoint}\`, { ...options, headers });
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || 'Request failed');
     return data;
   },
-  
   async register(username, email, password) {
     return this.request('/auth/register', { method: 'POST', body: JSON.stringify({ username, email, password }) });
   },
@@ -60,34 +73,35 @@ const api = {
     return data;
   },
   async getMe() { return this.request('/auth/me'); },
+  async changePassword(currentPassword, newPassword) {
+    return this.request('/auth/password', { method: 'PUT', body: JSON.stringify({ currentPassword, newPassword }) });
+  },
   logout() { this.setToken(null); },
   async getPlayers() { return this.request('/players'); },
   async getRosters() { return this.request('/rosters'); },
   async saveRoster(round, selections, stars, tiebreakers) {
-    return this.request(`/rosters/${round}`, { method: 'PUT', body: JSON.stringify({ selections, stars, tiebreakers }) });
+    return this.request(\`/rosters/\${round}\`, { method: 'PUT', body: JSON.stringify({ selections, stars, tiebreakers }) });
   },
-  async submitRoster(round) { return this.request(`/rosters/${round}/submit`, { method: 'POST' }); },
+  async submitRoster(round) { return this.request(\`/rosters/\${round}/submit\`, { method: 'POST' }); },
   async getStandings() { return this.request('/standings'); },
   async getSettings() { return this.request('/standings/settings'); },
   async refreshStats() { return this.request('/standings/refresh', { method: 'POST' }); },
   async updateSettings(settings) { return this.request('/standings/settings', { method: 'PUT', body: JSON.stringify(settings) }); },
   async getGroups() { return this.request('/groups'); },
-  async getGroup(id) { return this.request(`/groups/${id}`); },
+  async getGroup(id) { return this.request(\`/groups/\${id}\`); },
   async createGroup(name, description, isPrivate) { return this.request('/groups', { method: 'POST', body: JSON.stringify({ name, description, isPrivate }) }); },
   async joinGroup(code) { return this.request('/groups/join', { method: 'POST', body: JSON.stringify({ code }) }); },
-  async leaveGroup(id) { return this.request(`/groups/${id}/leave`, { method: 'POST' }); },
-  async deleteGroup(id) { return this.request(`/groups/${id}`, { method: 'DELETE' }); },
-  async updateBlast(id, message) { return this.request(`/groups/${id}/blast`, { method: 'PUT', body: JSON.stringify({ message }) }); },
-  async sendChat(groupId, message) { return this.request(`/groups/${groupId}/chat`, { method: 'POST', body: JSON.stringify({ message }) }); }
+  async leaveGroup(id) { return this.request(\`/groups/\${id}/leave\`, { method: 'POST' }); },
+  async deleteGroup(id) { return this.request(\`/groups/\${id}\`, { method: 'DELETE' }); },
+  async updateBlast(id, message) { return this.request(\`/groups/\${id}/blast\`, { method: 'PUT', body: JSON.stringify({ message }) }); },
+  async sendChat(groupId, message) { return this.request(\`/groups/\${groupId}/chat\`, { method: 'POST', body: JSON.stringify({ message }) }); }
 };
 
-// Auth Context
 const AuthContext = createContext(null);
 
 function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
-  
   useEffect(() => {
     if (api.token) {
       api.getMe().then(data => setUser(data.user)).catch(() => api.logout()).finally(() => setLoading(false));
@@ -95,24 +109,20 @@ function AuthProvider({ children }) {
       setLoading(false);
     }
   }, []);
-  
   const login = async (username, password) => {
     const data = await api.login(username, password);
     setUser(data.user);
     return data;
   };
-  
   const logout = () => { api.logout(); setUser(null); };
-  
   return <AuthContext.Provider value={{ user, setUser, login, logout, loading }}>{children}</AuthContext.Provider>;
 }
 
 const useAuth = () => useContext(AuthContext);
 
-// Components
 const Toast = ({ message, type, onClose }) => {
   useEffect(() => { const t = setTimeout(onClose, 3000); return () => clearTimeout(t); }, [onClose]);
-  return <div className={`fixed bottom-4 right-4 px-6 py-3 rounded-lg shadow-lg z-50 text-white font-medium ${type === 'success' ? 'bg-emerald-600' : 'bg-red-600'}`}>{message}</div>;
+  return <div className={\`fixed bottom-4 right-4 px-6 py-3 rounded-lg shadow-lg z-50 text-white font-medium \${type === 'success' ? 'bg-emerald-600' : 'bg-red-600'}\`}>{message}</div>;
 };
 
 const Modal = ({ isOpen, onClose, title, children }) => {
@@ -137,22 +147,79 @@ const LoadingSpinner = () => (
   </div>
 );
 
+const CountdownTimer = ({ targetDate, label }) => {
+  const [timeLeft, setTimeLeft] = useState({ days: 0, hours: 0, minutes: 0, seconds: 0 });
+  const [isExpired, setIsExpired] = useState(false);
+
+  useEffect(() => {
+    const calculateTimeLeft = () => {
+      const now = new Date().getTime();
+      const target = new Date(targetDate).getTime();
+      const difference = target - now;
+      if (difference <= 0) {
+        setIsExpired(true);
+        return { days: 0, hours: 0, minutes: 0, seconds: 0 };
+      }
+      return {
+        days: Math.floor(difference / (1000 * 60 * 60 * 24)),
+        hours: Math.floor((difference % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60)),
+        minutes: Math.floor((difference % (1000 * 60 * 60)) / (1000 * 60)),
+        seconds: Math.floor((difference % (1000 * 60)) / 1000)
+      };
+    };
+    setTimeLeft(calculateTimeLeft());
+    const timer = setInterval(() => setTimeLeft(calculateTimeLeft()), 1000);
+    return () => clearInterval(timer);
+  }, [targetDate]);
+
+  if (isExpired) {
+    return (
+      <div className="bg-red-600/20 border border-red-500 rounded-xl p-4 text-center">
+        <div className="text-red-400 font-bold text-lg">🔒 LOCKED</div>
+        <div className="text-gray-400 text-sm">{label} deadline has passed</div>
+      </div>
+    );
+  }
+
+  const TimeBox = ({ value, unit }) => (
+    <div className="bg-slate-700 rounded-lg p-2 min-w-[60px]">
+      <div className="text-2xl md:text-3xl font-black text-white">{String(value).padStart(2, '0')}</div>
+      <div className="text-xs text-gray-400 uppercase">{unit}</div>
+    </div>
+  );
+
+  return (
+    <div className={\`bg-gradient-to-r from-blue-600/20 to-purple-600/20 border border-blue-500/30 rounded-xl p-4 \${timeLeft.days === 0 && timeLeft.hours < 24 ? 'countdown-pulse' : ''}\`}>
+      <div className="text-center mb-3"><span className="text-gray-300 text-sm">{label}</span></div>
+      <div className="flex justify-center gap-2">
+        <TimeBox value={timeLeft.days} unit="Days" />
+        <TimeBox value={timeLeft.hours} unit="Hrs" />
+        <TimeBox value={timeLeft.minutes} unit="Min" />
+        <TimeBox value={timeLeft.seconds} unit="Sec" />
+      </div>
+      {timeLeft.days === 0 && timeLeft.hours < 6 && (
+        <div className="text-center mt-2 text-amber-400 text-sm font-semibold animate-pulse">⚠️ Deadline approaching!</div>
+      )}
+    </div>
+  );
+};
+
 const UpdateBanner = ({ lastUpdate, round, verified, onRefresh, isRefreshing, isAdmin }) => {
   const fmt = d => !d ? 'Never' : new Date(d).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true });
   return (
     <div className="bg-slate-800/50 border border-slate-700 rounded-lg px-4 py-3 text-sm">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-2">
-          <div className={`w-2 h-2 rounded-full ${verified ? 'bg-emerald-500' : 'bg-amber-500 animate-pulse'}`} />
+          <div className={\`w-2 h-2 rounded-full \${verified ? 'bg-emerald-500' : 'bg-amber-500 animate-pulse'}\`} />
           <span className="text-gray-400">Current: <span className="text-white font-semibold">{ROUND_NAMES[round] || 'Round 1'}</span></span>
         </div>
         <div className="flex items-center gap-4">
-          <span className={`px-2 py-0.5 rounded text-xs font-medium ${verified ? 'bg-emerald-600/20 text-emerald-400' : 'bg-amber-600/20 text-amber-400'}`}>
+          <span className={\`px-2 py-0.5 rounded text-xs font-medium \${verified ? 'bg-emerald-600/20 text-emerald-400' : 'bg-amber-600/20 text-amber-400'}\`}>
             {verified ? '✓ Verified' : '○ Pending'}
           </span>
           <span className="text-gray-500">Updated: {fmt(lastUpdate)}</span>
           {isAdmin && onRefresh && (
-            <button onClick={onRefresh} disabled={isRefreshing} className={`px-3 py-1 rounded text-xs font-bold ${isRefreshing ? 'bg-slate-700 text-gray-500' : 'bg-blue-600 text-white hover:bg-blue-500'}`}>
+            <button onClick={onRefresh} disabled={isRefreshing} className={\`px-3 py-1 rounded text-xs font-bold \${isRefreshing ? 'bg-slate-700 text-gray-500' : 'bg-blue-600 text-white hover:bg-blue-500'}\`}>
               {isRefreshing ? '⏳...' : '🔄 Refresh'}
             </button>
           )}
@@ -162,32 +229,45 @@ const UpdateBanner = ({ lastUpdate, round, verified, onRefresh, isRefreshing, is
   );
 };
 
+const PlayerImage = ({ player, size = 'md' }) => {
+  const [imgError, setImgError] = useState(false);
+  const sizeClasses = { sm: 'w-10 h-10 text-xs', md: 'w-12 h-12 text-sm', lg: 'w-16 h-16 text-base' };
+  if (imgError || !player.nhlId) {
+    return (
+      <div className={\`\${sizeClasses[size]} rounded-full flex items-center justify-center text-white font-bold\`} style={{ backgroundColor: player.teamColor || '#333' }}>
+        {player.name.split(' ').map(n => n[0]).join('')}
+      </div>
+    );
+  }
+  return (
+    <img src={getPlayerHeadshot(player.nhlId)} alt={player.name} className={\`\${sizeClasses[size]} rounded-full object-cover bg-slate-700\`} onError={() => setImgError(true)} />
+  );
+};
+
 const PlayerCard = ({ player, isSelected, isStar, canSelect, onToggle, onToggleStar, locked }) => {
   const isGoalie = player.position === 'goalie';
   const stats = player.stats || {};
   const getPts = (r) => {
-    const s = stats[`r${r}`] || {};
+    const s = stats[\`r\${r}\`] || {};
     if (isGoalie) return (s.w || 0) * 2 + (s.so || 0);
     return (s.g || 0) + (s.a || 0);
   };
   const r1 = getPts(1), r2 = getPts(2), r3 = getPts(3), total = r1 + r2 + r3;
   
   return (
-    <div className={`relative p-4 rounded-xl border-2 transition-all cursor-pointer ${isSelected ? 'bg-slate-700 border-red-500' : canSelect ? 'bg-slate-800/50 border-slate-600 hover:border-slate-400' : 'bg-slate-900/50 border-slate-700 opacity-50 cursor-not-allowed'}`}
+    <div className={\`relative p-4 rounded-xl border-2 transition-all cursor-pointer \${isSelected ? 'bg-slate-700 border-red-500' : canSelect ? 'bg-slate-800/50 border-slate-600 hover:border-slate-400' : 'bg-slate-900/50 border-slate-700 opacity-50 cursor-not-allowed'}\`}
       onClick={() => (isSelected || canSelect) && onToggle()}>
       {isSelected && <div className="absolute -top-2 -right-2 w-6 h-6 bg-red-600 rounded-full flex items-center justify-center text-white text-xs">✓</div>}
       {isStar && <div className="absolute -top-2 -left-2 w-6 h-6 bg-yellow-500 rounded-full flex items-center justify-center">⭐</div>}
       <div className="flex items-start justify-between mb-3">
         <div className="flex items-center gap-3">
-          <div className="w-12 h-12 rounded-full flex items-center justify-center text-white font-bold text-sm" style={{ backgroundColor: player.teamColor || '#333' }}>
-            {player.name.split(' ').map(n => n[0]).join('')}
-          </div>
+          <PlayerImage player={player} size="md" />
           <div>
             <div className="text-white font-semibold">{player.name}</div>
             <div className="text-gray-400 text-sm">{player.team}</div>
           </div>
         </div>
-        <div className="bg-amber-500 text-black font-black text-sm px-3 py-1 rounded-lg">${player.cost}</div>
+        <div className="bg-amber-500 text-black font-black text-sm px-3 py-1 rounded-lg">\${player.cost}</div>
       </div>
       <div className="grid grid-cols-4 gap-1 pt-3 border-t border-slate-600 text-xs">
         <div className="text-center"><div className="text-gray-500">R1</div><div className="text-white font-bold">{r1}</div></div>
@@ -197,7 +277,7 @@ const PlayerCard = ({ player, isSelected, isStar, canSelect, onToggle, onToggleS
       </div>
       {isSelected && !locked && onToggleStar && (
         <button onClick={e => { e.stopPropagation(); onToggleStar(); }}
-          className={`mt-3 w-full px-3 py-2 text-xs font-bold rounded-lg ${isStar ? 'bg-yellow-500 text-black' : 'bg-slate-600 text-gray-300 hover:bg-slate-500'}`}>
+          className={\`mt-3 w-full px-3 py-2 text-xs font-bold rounded-lg \${isStar ? 'bg-yellow-500 text-black' : 'bg-slate-600 text-gray-300 hover:bg-slate-500'}\`}>
           {isStar ? '⭐ STAR PLAYER' : 'Set as Star'}
         </button>
       )}
@@ -205,11 +285,75 @@ const PlayerCard = ({ player, isSelected, isStar, canSelect, onToggle, onToggleS
   );
 };
 
-// Main App (wrapped by AuthProvider)
+const PlayerFilter = ({ searchTerm, setSearchTerm, teamFilter, setTeamFilter, teams }) => (
+  <div className="flex flex-col sm:flex-row gap-3 mb-6">
+    <div className="flex-1 relative">
+      <input type="text" placeholder="Search players..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)}
+        className="w-full bg-slate-700 border border-slate-600 rounded-lg px-4 py-2 pl-10 text-white placeholder-gray-400" />
+      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400">🔍</span>
+    </div>
+    <select value={teamFilter} onChange={(e) => setTeamFilter(e.target.value)} className="bg-slate-700 border border-slate-600 rounded-lg px-4 py-2 text-white">
+      <option value="">All Teams</option>
+      {teams.map(team => (<option key={team} value={team}>{team}</option>))}
+    </select>
+    {(searchTerm || teamFilter) && (
+      <button onClick={() => { setSearchTerm(''); setTeamFilter(''); }} className="bg-slate-600 text-gray-300 px-4 py-2 rounded-lg hover:bg-slate-500">Clear</button>
+    )}
+  </div>
+);
+
+const TiebreakerSection = ({ round, tiebreakers, setTiebreakers, locked }) => {
+  const questions = TIEBREAKER_QUESTIONS[round] || [];
+  return (
+    <div className="bg-slate-800 rounded-xl p-6 mb-8">
+      <h3 className="text-xl font-bold text-white mb-4">🎯 Tiebreaker Questions</h3>
+      <p className="text-gray-400 text-sm mb-4">In case of a tie, these answers will determine the winner (closest without going over).</p>
+      <div className="space-y-4">
+        {questions.map((question, idx) => (
+          <div key={idx}>
+            <label className="block text-gray-300 text-sm mb-2">{idx + 1}. {question}</label>
+            <input type="number" min="0" value={tiebreakers[\`q\${idx + 1}\`] || ''} disabled={locked}
+              onChange={(e) => setTiebreakers({ ...tiebreakers, [\`q\${idx + 1}\`]: e.target.value ? parseInt(e.target.value) : null })}
+              className={\`w-full bg-slate-700 border border-slate-600 rounded-lg px-4 py-2 text-white \${locked ? 'opacity-50 cursor-not-allowed' : ''}\`}
+              placeholder="Enter your answer" />
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+};
+
+const MobileMenu = ({ isOpen, onClose, page, setPage, user, setAdminModal }) => {
+  if (!isOpen) return null;
+  const navItems = ['home', 'rules', 'picks', 'standings', 'groups'];
+  return (
+    <div className="fixed inset-0 z-50 md:hidden">
+      <div className="absolute inset-0 bg-black/70" onClick={onClose} />
+      <div className="absolute right-0 top-0 h-full w-64 bg-slate-900 shadow-xl">
+        <div className="flex items-center justify-between p-4 border-b border-slate-700">
+          <span className="text-white font-bold">Menu</span>
+          <button onClick={onClose} className="text-gray-400 hover:text-white text-2xl">&times;</button>
+        </div>
+        <nav className="p-4 space-y-2">
+          {navItems.map(p => (
+            <button key={p} onClick={() => { setPage(p); onClose(); }}
+              className={\`w-full text-left px-4 py-3 rounded-lg font-bold uppercase \${page === p ? 'bg-red-600 text-white' : 'text-gray-300 hover:bg-slate-700'}\`}>{p}</button>
+          ))}
+          {user?.is_admin && (
+            <button onClick={() => { setAdminModal(true); onClose(); }}
+              className="w-full text-left px-4 py-3 rounded-lg font-bold uppercase text-amber-400 hover:bg-slate-700">Admin</button>
+          )}
+        </nav>
+      </div>
+    </div>
+  );
+};
+
 function AppContent() {
   const { user, setUser, login, logout, loading: authLoading } = useAuth();
   const [page, setPage] = useState('home');
   const [toast, setToast] = useState(null);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [authModal, setAuthModal] = useState({ open: false, mode: 'login' });
   const [authForm, setAuthForm] = useState({ username: '', email: '', password: '' });
   const [authErr, setAuthErr] = useState('');
@@ -217,7 +361,6 @@ function AppContent() {
   const [verifyCode, setVerifyCode] = useState('');
   const [pendingEmail, setPendingEmail] = useState('');
   const [demoCode, setDemoCode] = useState('');
-  
   const [players, setPlayers] = useState([]);
   const [settings, setSettings] = useState({ currentRound: 2, lockDates: {}, lastUpdate: null, isVerified: false });
   const [standings, setStandings] = useState([]);
@@ -225,6 +368,7 @@ function AppContent() {
   const [rosters, setRosters] = useState({ 1: null, 2: null, 3: null });
   const [pickRound, setPickRound] = useState(2);
   const [stars, setStars] = useState({ forward: null, defense: null, goalie: null });
+  const [tiebreakers, setTiebreakers] = useState({ q1: null, q2: null });
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [dataLoading, setDataLoading] = useState(true);
   const [viewGroup, setViewGroup] = useState(null);
@@ -235,8 +379,11 @@ function AppContent() {
   const [joinGrpModal, setJoinGrpModal] = useState(false);
   const [grpForm, setGrpForm] = useState({ name: '', priv: false });
   const [joinCode, setJoinCode] = useState('');
+  const [searchTerm, setSearchTerm] = useState('');
+  const [teamFilter, setTeamFilter] = useState('');
+  const [passwordForm, setPasswordForm] = useState({ current: '', new: '', confirm: '' });
+  const [passwordErr, setPasswordErr] = useState('');
 
-  // Load initial data
   useEffect(() => {
     Promise.all([
       api.getPlayers().catch(() => ({ players: [] })),
@@ -251,32 +398,44 @@ function AppContent() {
     });
   }, []);
 
-  // Load user data
   useEffect(() => {
     if (user) {
       api.getRosters().then(data => {
         const r = { 1: null, 2: null, 3: null };
+        const t = { 1: { q1: null, q2: null }, 2: { q1: null, q2: null }, 3: { q1: null, q2: null } };
         [1, 2, 3].forEach(round => {
           if (data.rosters && data.rosters[round]) r[round] = data.rosters[round].selections;
+          if (data.tiebreakers && data.tiebreakers[round]) t[round] = data.tiebreakers[round];
         });
         setRosters(r);
+        setTiebreakers(t[pickRound] || { q1: null, q2: null });
       }).catch(console.error);
       api.getGroups().then(data => setGroups(data.groups || [])).catch(console.error);
     }
   }, [user]);
 
+  useEffect(() => {
+    if (user) {
+      api.getRosters().then(data => {
+        if (data.tiebreakers && data.tiebreakers[pickRound]) {
+          setTiebreakers(data.tiebreakers[pickRound]);
+        } else {
+          setTiebreakers({ q1: null, q2: null });
+        }
+      }).catch(console.error);
+    }
+  }, [pickRound, user]);
+
   const currentRoster = rosters[pickRound] || { western: { forwards: [], defense: [], goalies: [] }, eastern: { forwards: [], defense: [], goalies: [] } };
-  
+  const uniqueTeams = useMemo(() => [...new Set(players.map(p => p.team))].sort(), [players]);
+
   const salary = useMemo(() => {
     if (!currentRoster || !players.length) return 0;
     let total = 0;
     ['western', 'eastern'].forEach(conf => {
       ['forwards', 'defense', 'goalies'].forEach(pos => {
         const ids = currentRoster[conf]?.[pos] || [];
-        ids.forEach(id => {
-          const p = players.find(x => x.id === id);
-          if (p) total += p.cost;
-        });
+        ids.forEach(id => { const p = players.find(x => x.id === id); if (p) total += p.cost; });
       });
     });
     return total;
@@ -333,6 +492,18 @@ function AppContent() {
     } catch (err) { setToast({ message: err.message, type: 'error' }); }
   };
 
+  const handlePasswordChange = async (e) => {
+    e.preventDefault();
+    setPasswordErr('');
+    if (passwordForm.new !== passwordForm.confirm) { setPasswordErr('New passwords do not match'); return; }
+    if (passwordForm.new.length < 6) { setPasswordErr('New password must be at least 6 characters'); return; }
+    try {
+      await api.changePassword(passwordForm.current, passwordForm.new);
+      setPasswordForm({ current: '', new: '', confirm: '' });
+      setToast({ message: 'Password changed successfully!', type: 'success' });
+    } catch (err) { setPasswordErr(err.message); }
+  };
+
   const togglePlayer = (conf, pos, id) => {
     if (locked) { setToast({ message: 'Rosters are locked!', type: 'error' }); return; }
     const current = currentRoster[conf]?.[pos] || [];
@@ -362,7 +533,7 @@ function AppContent() {
 
   const saveRoster = async () => {
     try {
-      await api.saveRoster(pickRound, currentRoster, stars, {});
+      await api.saveRoster(pickRound, currentRoster, stars, tiebreakers);
       setToast({ message: 'Roster saved!', type: 'success' });
     } catch (err) { setToast({ message: err.message, type: 'error' }); }
   };
@@ -370,7 +541,7 @@ function AppContent() {
   const submitRoster = async () => {
     if (!isComplete) { setToast({ message: 'Complete your roster first', type: 'error' }); return; }
     try {
-      await api.saveRoster(pickRound, currentRoster, stars, {});
+      await api.saveRoster(pickRound, currentRoster, stars, tiebreakers);
       await api.submitRoster(pickRound);
       setToast({ message: 'Roster submitted!', type: 'success' });
       const standingsData = await api.getStandings();
@@ -426,7 +597,14 @@ function AppContent() {
     } catch (err) { setToast({ message: err.message, type: 'error' }); setIsRefreshing(false); }
   };
 
-  // Loading
+  const filterPlayers = (playerList) => {
+    return playerList.filter(p => {
+      const matchesSearch = !searchTerm || p.name.toLowerCase().includes(searchTerm.toLowerCase());
+      const matchesTeam = !teamFilter || p.team === teamFilter;
+      return matchesSearch && matchesTeam;
+    });
+  };
+
   if (authLoading || dataLoading) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 flex items-center justify-center">
@@ -445,7 +623,6 @@ function AppContent() {
     if (playersByConf[p.conference]?.[pos]) playersByConf[p.conference][pos].push(p);
   });
 
-  // Nav
   const Nav = () => (
     <nav className="bg-slate-900 border-b-4 border-red-600 sticky top-0 z-40">
       <div className="max-w-7xl mx-auto px-4 flex items-center justify-between h-16">
@@ -468,18 +645,23 @@ function AppContent() {
           ) : (
             <>
               <button onClick={() => setAuthModal({ open: true, mode: 'login' })} className="bg-slate-700 text-white px-4 py-2 rounded-lg font-bold">Sign In</button>
-              <button onClick={() => setAuthModal({ open: true, mode: 'register' })} className="bg-red-600 text-white px-4 py-2 rounded-lg font-bold ml-2">Sign Up</button>
+              <button onClick={() => setAuthModal({ open: true, mode: 'register' })} className="bg-red-600 text-white px-4 py-2 rounded-lg font-bold ml-2 hidden sm:block">Sign Up</button>
             </>
           )}
+          <button onClick={() => setMobileMenuOpen(true)} className="md:hidden text-white p-2">
+            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" /></svg>
+          </button>
         </div>
       </div>
     </nav>
   );
 
-  // Home
   const Home = () => (
     <div className="max-w-7xl mx-auto px-4 py-8">
       <UpdateBanner lastUpdate={settings.lastUpdate} round={settings.currentRound} verified={settings.isVerified} onRefresh={handleRefreshStats} isRefreshing={isRefreshing} isAdmin={user?.is_admin} />
+      {settings.lockDates?.[settings.currentRound] && !isRoundLocked(settings.currentRound) && (
+        <div className="mt-6"><CountdownTimer targetDate={settings.lockDates[settings.currentRound]} label={`${ROUND_NAMES[settings.currentRound]} Deadline`} /></div>
+      )}
       {!user && (
         <div className="bg-blue-900/50 rounded-xl p-6 my-6 border border-blue-500/30">
           <h2 className="text-2xl font-bold text-white mb-2">Welcome to NetSports Fantasy!</h2>
@@ -499,6 +681,15 @@ function AppContent() {
               <div className="bg-red-600 rounded-lg p-4 text-center"><div className="text-white text-3xl font-black">{groups.length}</div><div className="text-red-200 text-xs">GROUPS</div></div>
             </div>
           </div>
+          {user && (
+            <div className="bg-slate-800 rounded-xl p-6">
+              <h3 className="text-lg font-bold text-white mb-4">Quick Actions</h3>
+              <div className="grid grid-cols-2 gap-4">
+                <button onClick={() => setPage('picks')} className="bg-blue-600 hover:bg-blue-500 text-white py-3 rounded-lg font-bold">📝 Make Picks</button>
+                <button onClick={() => setPage('standings')} className="bg-purple-600 hover:bg-purple-500 text-white py-3 rounded-lg font-bold">🏆 View Standings</button>
+              </div>
+            </div>
+          )}
         </div>
         <div className="space-y-6">
           <div className="bg-slate-800 rounded-xl overflow-hidden">
@@ -522,7 +713,6 @@ function AppContent() {
     </div>
   );
 
-  // Picks
   const Picks = () => {
     if (!user) return (
       <div className="max-w-2xl mx-auto px-4 py-16 text-center">
@@ -535,7 +725,7 @@ function AppContent() {
       <div className="max-w-7xl mx-auto px-4 py-8">
         <div className="text-center mb-8">
           <h1 className="text-4xl font-black text-white mb-2">BUILD YOUR TEAM</h1>
-          <div className="flex justify-center gap-2 mb-2">
+          <div className="flex justify-center gap-2 mb-4">
             {[1, 2, 3].map(r => (
               <button key={r} onClick={() => !isRoundLocked(r) && setPickRound(r)} className={`px-4 py-2 rounded-lg font-bold text-sm ${pickRound === r ? 'bg-red-600 text-white ring-2 ring-red-400' : 'bg-slate-700 text-gray-300'} ${isRoundLocked(r) ? 'opacity-50 cursor-not-allowed' : ''}`}>
                 {r === 3 ? 'Finals' : `Round ${r}`} {isRoundLocked(r) ? '🔒' : ''}
@@ -545,6 +735,9 @@ function AppContent() {
           <p className="text-amber-400 font-semibold mb-1">{ROUND_NAMES[pickRound]}</p>
           <p className="text-gray-400">$30 budget • 3F 2D 1G per conf • Stars = 2x</p>
         </div>
+        {settings.lockDates?.[pickRound] && !locked && (
+          <div className="mb-6"><CountdownTimer targetDate={settings.lockDates[pickRound]} label="Time Until Deadline" /></div>
+        )}
         <div className="sticky top-16 z-30 bg-slate-900/95 backdrop-blur rounded-xl p-4 mb-8 border border-slate-700">
           <div className="flex flex-wrap items-center justify-between gap-4">
             <div className="flex items-center gap-4">
@@ -557,35 +750,38 @@ function AppContent() {
             </div>
           </div>
         </div>
+        <PlayerFilter searchTerm={searchTerm} setSearchTerm={setSearchTerm} teamFilter={teamFilter} setTeamFilter={setTeamFilter} teams={uniqueTeams} />
         {['western', 'eastern'].map(conf => (
           <div key={conf} className="mb-12">
             <h2 className="text-2xl font-black text-white uppercase mb-6">{conf} Conference</h2>
             {['forwards', 'defense', 'goalies'].map(pos => {
               const max = pos === 'forwards' ? 3 : pos === 'defense' ? 2 : 1;
               const selected = currentRoster[conf]?.[pos] || [];
-              const posPlayers = playersByConf[conf]?.[pos] || [];
+              const posPlayers = filterPlayers(playersByConf[conf]?.[pos] || []);
               return (
                 <div key={pos} className="mb-8">
                   <div className="flex justify-between mb-4"><h3 className="text-lg font-bold text-gray-300 uppercase">{pos}</h3><span className="text-sm text-gray-400">{selected.length}/{max}</span></div>
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-                    {posPlayers.filter(p => !p.isEliminated).map(player => {
-                      const isSel = selected.includes(player.id);
-                      const starType = pos === 'forwards' ? 'forward' : pos === 'defense' ? 'defense' : 'goalie';
-                      const isStar = stars[starType] === player.id;
-                      const canSelect = !locked && !isSel && selected.length < max && salary + player.cost <= SALARY_CAP;
-                      return <PlayerCard key={player.id} player={player} isSelected={isSel} isStar={isStar} canSelect={canSelect} onToggle={() => togglePlayer(conf, pos, player.id)} onToggleStar={() => toggleStar(starType, player.id)} locked={locked} />;
-                    })}
-                  </div>
+                  {posPlayers.length === 0 ? (<div className="text-gray-500 text-center py-8">No players match your search</div>) : (
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                      {posPlayers.filter(p => !p.isEliminated).map(player => {
+                        const isSel = selected.includes(player.id);
+                        const starType = pos === 'forwards' ? 'forward' : pos === 'defense' ? 'defense' : 'goalie';
+                        const isStar = stars[starType] === player.id;
+                        const canSelect = !locked && !isSel && selected.length < max && salary + player.cost <= SALARY_CAP;
+                        return <PlayerCard key={player.id} player={player} isSelected={isSel} isStar={isStar} canSelect={canSelect} onToggle={() => togglePlayer(conf, pos, player.id)} onToggleStar={() => toggleStar(starType, player.id)} locked={locked} />;
+                      })}
+                    </div>
+                  )}
                 </div>
               );
             })}
           </div>
         ))}
+        <TiebreakerSection round={pickRound} tiebreakers={tiebreakers} setTiebreakers={setTiebreakers} locked={locked} />
       </div>
     );
   };
 
-  // Standings
   const Standings = () => (
     <div className="max-w-7xl mx-auto px-4 py-8">
       <h1 className="text-4xl font-black text-white text-center mb-4">STANDINGS</h1>
@@ -594,16 +790,19 @@ function AppContent() {
         <div className="bg-gradient-to-r from-amber-500 to-amber-600 px-4 py-3"><span className="text-black font-bold uppercase">🏆 Overall</span></div>
         <div className="overflow-x-auto">
           <table className="w-full">
-            <thead><tr className="bg-slate-700"><th className="px-4 py-3 text-left text-xs font-bold text-gray-400">Rank</th><th className="px-4 py-3 text-left text-xs font-bold text-gray-400">Player</th><th className="px-4 py-3 text-center text-xs font-bold text-gray-400">Total</th></tr></thead>
+            <thead><tr className="bg-slate-700"><th className="px-4 py-3 text-left text-xs font-bold text-gray-400">Rank</th><th className="px-4 py-3 text-left text-xs font-bold text-gray-400">Player</th><th className="px-4 py-3 text-center text-xs font-bold text-gray-400">R1</th><th className="px-4 py-3 text-center text-xs font-bold text-gray-400">R2</th><th className="px-4 py-3 text-center text-xs font-bold text-gray-400">R3</th><th className="px-4 py-3 text-center text-xs font-bold text-gray-400">Total</th></tr></thead>
             <tbody className="divide-y divide-slate-700">
               {standings.map((e, i) => (
                 <tr key={e.id} className={`hover:bg-slate-700/50 ${e.id === user?.id ? 'bg-blue-900/20' : ''}`}>
                   <td className="px-4 py-3"><div className={`w-7 h-7 rounded-full flex items-center justify-center font-bold text-xs ${i === 0 ? 'bg-amber-500 text-black' : i === 1 ? 'bg-gray-400 text-black' : i === 2 ? 'bg-amber-700 text-white' : 'bg-slate-600 text-white'}`}>{i + 1}</div></td>
                   <td className="px-4 py-3"><span className="text-white text-sm">{e.username}</span>{e.id === user?.id && <span className="text-xs bg-blue-600 px-1.5 py-0.5 rounded ml-2">YOU</span>}</td>
+                  <td className="px-4 py-3 text-center text-gray-400">{e.rounds?.r1 || 0}</td>
+                  <td className="px-4 py-3 text-center text-gray-400">{e.rounds?.r2 || 0}</td>
+                  <td className="px-4 py-3 text-center text-gray-400">{e.rounds?.r3 || 0}</td>
                   <td className="px-4 py-3 text-center text-amber-400 font-bold">{e.points}</td>
                 </tr>
               ))}
-              {standings.length === 0 && <tr><td colSpan={3} className="px-4 py-8 text-center text-gray-500">No entries yet</td></tr>}
+              {standings.length === 0 && <tr><td colSpan={6} className="px-4 py-8 text-center text-gray-500">No entries yet</td></tr>}
             </tbody>
           </table>
         </div>
@@ -611,7 +810,6 @@ function AppContent() {
     </div>
   );
 
-  // Groups
   const Groups = () => {
     if (!user) return (
       <div className="max-w-2xl mx-auto px-4 py-16 text-center">
@@ -648,7 +846,6 @@ function AppContent() {
     );
   };
 
-  // Group Home
   const GroupHome = () => {
     const [chatMsg, setChatMsg] = useState('');
     if (!groupData) return <LoadingSpinner />;
@@ -707,7 +904,6 @@ function AppContent() {
     );
   };
 
-  // Rules
   const Rules = () => (
     <div className="max-w-4xl mx-auto px-4 py-8">
       <h1 className="text-4xl font-black text-white text-center mb-8">RULES & SCORING</h1>
@@ -730,6 +926,13 @@ function AppContent() {
             <div><h3 className="text-white font-bold mb-2">Goalies</h3><p className="text-gray-300">Win = 2 pts, Shutout = 1 pt</p></div>
           </div>
         </div>
+        <div className="bg-slate-800 rounded-xl overflow-hidden">
+          <div className="bg-blue-600 px-6 py-4"><h2 className="text-xl font-bold text-white">🎯 Tiebreakers</h2></div>
+          <div className="p-6 text-gray-300">
+            <p className="mb-4">Each round has tiebreaker questions. In case of a tie, the player closest to the correct answer without going over wins.</p>
+            <p>You can view and answer tiebreaker questions on the Picks page.</p>
+          </div>
+        </div>
       </div>
     </div>
   );
@@ -737,6 +940,7 @@ function AppContent() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900">
       <Nav />
+      <MobileMenu isOpen={mobileMenuOpen} onClose={() => setMobileMenuOpen(false)} page={page} setPage={setPage} user={user} setAdminModal={setAdminModal} />
       {page === 'home' && <Home />}
       {page === 'picks' && <Picks />}
       {page === 'standings' && <Standings />}
@@ -745,7 +949,6 @@ function AppContent() {
       {page === 'rules' && <Rules />}
       <footer className="bg-slate-900 border-t border-slate-800 py-6 mt-12"><div className="text-center text-gray-400 text-sm">NetSports Fantasy © 2026</div></footer>
 
-      {/* Auth Modal */}
       <Modal isOpen={authModal.open && !verifyStep} onClose={() => setAuthModal({ open: false, mode: 'login' })} title={authModal.mode === 'login' ? 'Sign In' : 'Create Account'}>
         <form onSubmit={handleAuth} className="space-y-4">
           {authErr && <div className="bg-red-500/20 border border-red-500 text-red-400 px-4 py-2 rounded-lg text-sm">{authErr}</div>}
@@ -757,19 +960,15 @@ function AppContent() {
         </form>
       </Modal>
 
-      {/* Verify Modal */}
       <Modal isOpen={!!verifyStep} onClose={() => {}} title="Verify Your Email">
         <div className="space-y-4">
-          <div className="bg-blue-600/20 border border-blue-600/30 rounded-lg p-4 text-center">
-            <p className="text-gray-300">Code sent to: <span className="text-white font-bold">{pendingEmail}</span></p>
-          </div>
+          <div className="bg-blue-600/20 border border-blue-600/30 rounded-lg p-4 text-center"><p className="text-gray-300">Code sent to: <span className="text-white font-bold">{pendingEmail}</span></p></div>
           {demoCode && <div className="bg-amber-600/20 border border-amber-600/30 rounded-lg p-4"><p className="text-amber-400 text-sm">DEMO: Your code is <span className="text-white font-mono font-bold">{demoCode}</span></p></div>}
           <input type="text" value={verifyCode} onChange={e => setVerifyCode(e.target.value.replace(/\D/g, '').slice(0, 6))} className="w-full bg-slate-700 border border-slate-600 rounded-lg px-4 py-3 text-white text-center text-2xl font-mono" placeholder="000000" maxLength={6} />
           <button onClick={handleVerify} disabled={verifyCode.length !== 6} className={`w-full py-3 rounded-lg font-bold ${verifyCode.length === 6 ? 'bg-emerald-600 text-white' : 'bg-slate-700 text-gray-500'}`}>Verify</button>
         </div>
       </Modal>
 
-      {/* Create Group Modal */}
       <Modal isOpen={createGrpModal} onClose={() => setCreateGrpModal(false)} title="Create Group">
         <form onSubmit={createGroup} className="space-y-4">
           <div><label className="block text-gray-300 text-sm mb-1">Group Name</label><input type="text" value={grpForm.name} onChange={e => setGrpForm({ ...grpForm, name: e.target.value })} className="w-full bg-slate-700 border border-slate-600 rounded-lg px-4 py-2 text-white" /></div>
@@ -778,7 +977,6 @@ function AppContent() {
         </form>
       </Modal>
 
-      {/* Join Group Modal */}
       <Modal isOpen={joinGrpModal} onClose={() => { setJoinGrpModal(false); setJoinCode(''); }} title="Join Group">
         <form onSubmit={joinGroup} className="space-y-4">
           <input type="text" value={joinCode} onChange={e => setJoinCode(e.target.value.toUpperCase())} className="w-full bg-slate-700 border border-slate-600 rounded-lg px-4 py-2 text-white uppercase text-center text-lg" placeholder="ENTER CODE" maxLength={8} />
@@ -786,15 +984,23 @@ function AppContent() {
         </form>
       </Modal>
 
-      {/* Account Modal */}
-      <Modal isOpen={accModal} onClose={() => setAccModal(false)} title="Account">
+      <Modal isOpen={accModal} onClose={() => { setAccModal(false); setPasswordForm({ current: '', new: '', confirm: '' }); setPasswordErr(''); }} title="Account">
         <div className="space-y-4">
           <div className="bg-slate-700/50 rounded-lg p-4"><div className="text-gray-400 text-xs uppercase mb-1">Username</div><div className="text-white font-semibold">{user?.username}</div></div>
           <div className="bg-slate-700/50 rounded-lg p-4"><div className="text-gray-400 text-xs uppercase mb-1">Email</div><div className="text-white">{user?.email}</div></div>
+          <div className="border-t border-slate-700 pt-4">
+            <h4 className="text-white font-semibold mb-3">Change Password</h4>
+            {passwordErr && <div className="bg-red-500/20 border border-red-500 text-red-400 px-4 py-2 rounded-lg text-sm mb-3">{passwordErr}</div>}
+            <form onSubmit={handlePasswordChange} className="space-y-3">
+              <input type="password" placeholder="Current Password" value={passwordForm.current} onChange={e => setPasswordForm({ ...passwordForm, current: e.target.value })} className="w-full bg-slate-700 border border-slate-600 rounded-lg px-4 py-2 text-white" />
+              <input type="password" placeholder="New Password" value={passwordForm.new} onChange={e => setPasswordForm({ ...passwordForm, new: e.target.value })} className="w-full bg-slate-700 border border-slate-600 rounded-lg px-4 py-2 text-white" />
+              <input type="password" placeholder="Confirm New Password" value={passwordForm.confirm} onChange={e => setPasswordForm({ ...passwordForm, confirm: e.target.value })} className="w-full bg-slate-700 border border-slate-600 rounded-lg px-4 py-2 text-white" />
+              <button type="submit" className="w-full bg-blue-600 text-white py-2 rounded-lg font-bold">Update Password</button>
+            </form>
+          </div>
         </div>
       </Modal>
 
-      {/* Admin Modal */}
       <Modal isOpen={adminModal} onClose={() => setAdminModal(false)} title="Admin Panel">
         <div className="space-y-4">
           <div><label className="block text-gray-300 text-sm mb-2">Current Round</label>
@@ -803,6 +1009,22 @@ function AppContent() {
             </select>
           </div>
           <button onClick={handleRefreshStats} disabled={isRefreshing} className={`w-full py-2 rounded-lg font-bold ${isRefreshing ? 'bg-slate-700 text-gray-500' : 'bg-blue-600 text-white'}`}>{isRefreshing ? 'Refreshing...' : '🔄 Refresh NHL Stats'}</button>
+          <div className="border-t border-slate-700 pt-4">
+            <h4 className="text-white font-semibold mb-3">Tiebreaker Answers</h4>
+            <p className="text-gray-400 text-sm mb-3">Enter the correct answers after each round completes.</p>
+            <div className="space-y-3">
+              {[1, 2, 3].map(r => (
+                <div key={r} className="bg-slate-700/50 rounded-lg p-3">
+                  <div className="text-gray-400 text-xs uppercase mb-2">Round {r}</div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <input type="number" placeholder="Q1 Answer" className="bg-slate-600 border border-slate-500 rounded px-3 py-1 text-white text-sm" />
+                    <input type="number" placeholder="Q2 Answer" className="bg-slate-600 border border-slate-500 rounded px-3 py-1 text-white text-sm" />
+                  </div>
+                </div>
+              ))}
+              <button className="w-full bg-emerald-600 text-white py-2 rounded-lg font-bold text-sm">Save Tiebreaker Answers</button>
+            </div>
+          </div>
         </div>
       </Modal>
 
@@ -811,7 +1033,6 @@ function AppContent() {
   );
 }
 
-// Root - wraps AppContent with AuthProvider
 function App() {
   return <AuthProvider><AppContent /></AuthProvider>;
 }
