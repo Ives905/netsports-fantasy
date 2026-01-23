@@ -42,7 +42,7 @@ const TIEBREAKER_QUESTIONS = {
   ]
 };
 
-const getPlayerHeadshot = (nhlId) => `https://cms.nhl.bamgrid.com/images/headshots/current/168x168/${nhlId}.jpg`;
+const getPlayerHeadshot = (nhlId) => `https://assets.nhle.com/mugs/nhl/20242025/${nhlId}.png`;
 
 const api = {
   token: localStorage.getItem('netsports-token'),
@@ -93,7 +93,15 @@ const api = {
   async joinGroup(code) { return this.request('/groups/join', { method: 'POST', body: JSON.stringify({ code }) }); },
   async leaveGroup(id) { return this.request(`/groups/${id}/leave`, { method: 'POST' }); },
   async deleteGroup(id) { return this.request(`/groups/${id}`, { method: 'DELETE' }); },
-  async sendChat(groupId, message) { return this.request(`/groups/${groupId}/chat`, { method: 'POST', body: JSON.stringify({ message }) }); }
+  async sendChat(groupId, message) { return this.request(`/groups/${groupId}/chat`, { method: 'POST', body: JSON.stringify({ message }) }); },
+  async getAdminRounds() { return this.request('/admin/rounds'); },
+  async getAdminTeams() { return this.request('/admin/teams'); },
+  async updatePickDeadline(roundNumber, deadline) {
+    return this.request(`/admin/rounds/${roundNumber}/deadline`, { method: 'PUT', body: JSON.stringify({ pick_deadline: deadline }) });
+  },
+  async setQualifiedTeams(roundNumber, teams) {
+    return this.request(`/admin/rounds/${roundNumber}/qualified-teams`, { method: 'POST', body: JSON.stringify({ teams }) });
+  }
 };
 
 const AuthContext = createContext(null);
@@ -230,16 +238,28 @@ const UpdateBanner = ({ lastUpdate, round, verified, onRefresh, isRefreshing, is
 
 const PlayerImage = ({ player, size = 'md' }) => {
   const [imgError, setImgError] = useState(false);
+  const [imgSrc, setImgSrc] = useState(getPlayerHeadshot(player.nhlId));
   const sizeClasses = { sm: 'w-10 h-10 text-xs', md: 'w-12 h-12 text-sm', lg: 'w-16 h-16 text-base' };
+  
+  const handleError = () => {
+    if (imgSrc.includes('assets.nhle.com')) {
+      setImgSrc(`https://cms.nhl.bamgrid.com/images/headshots/current/168x168/${player.nhlId}.jpg`);
+    } else if (imgSrc.includes('cms.nhl.bamgrid.com')) {
+      setImgSrc(`https://nhl.bamcontent.com/images/headshots/current/168x168/${player.nhlId}@2x.jpg`);
+    } else {
+      setImgError(true);
+    }
+  };
+  
   if (imgError || !player.nhlId) {
     return (
-      <div className={`${sizeClasses[size]} rounded-full flex items-center justify-center text-white font-bold`} style={{ backgroundColor: player.teamColor || '#333' }}>
+      <div className={`${sizeClasses[size]} rounded-full flex items-center justify-center text-white font-bold`} style={{ backgroundColor: player.teamColor || '#334155' }}>
         {player.name.split(' ').map(n => n[0]).join('')}
       </div>
     );
   }
   return (
-    <img src={getPlayerHeadshot(player.nhlId)} alt={player.name} className={`${sizeClasses[size]} rounded-full object-cover bg-slate-700`} onError={() => setImgError(true)} />
+    <img src={imgSrc} alt={player.name} className={`${sizeClasses[size]} rounded-full object-cover bg-slate-700`} onError={handleError} />
   );
 };
 
@@ -382,6 +402,11 @@ function AppContent() {
   const [teamFilter, setTeamFilter] = useState('');
   const [passwordForm, setPasswordForm] = useState({ current: '', new: '', confirm: '' });
   const [passwordErr, setPasswordErr] = useState('');
+  const [adminTab, setAdminTab] = useState('general');
+  const [adminRounds, setAdminRounds] = useState([]);
+  const [adminTeams, setAdminTeams] = useState([]);
+  const [deadlineForm, setDeadlineForm] = useState({});
+  const [selectedTeams, setSelectedTeams] = useState({});
 
   useEffect(() => {
     Promise.all([
@@ -424,6 +449,69 @@ function AppContent() {
       }).catch(console.error);
     }
   }, [pickRound, user]);
+
+  useEffect(() => {
+    if (adminModal && user?.is_admin) {
+      Promise.all([
+        api.getAdminRounds().catch(() => ({ rounds: [] })),
+        api.getAdminTeams().catch(() => ({ teams: [] }))
+      ]).then(([roundsData, teamsData]) => {
+        setAdminRounds(roundsData.rounds || []);
+        setAdminTeams(teamsData.teams || []);
+        const deadlines = {};
+        (roundsData.rounds || []).forEach(r => {
+          deadlines[r.round_number] = r.pick_deadline ? 
+            new Date(r.pick_deadline).toISOString().slice(0, 16) : '';
+        });
+        setDeadlineForm(deadlines);
+        const teams = {};
+        (roundsData.rounds || []).forEach(r => {
+          teams[r.round_number] = (r.qualifiedTeams || [])
+            .filter(t => t.qualified)
+            .map(t => t.team_abbrev);
+        });
+        setSelectedTeams(teams);
+      });
+    }
+  }, [adminModal, user]);
+
+  const handleUpdateDeadline = async (roundNumber) => {
+    try {
+      const deadline = deadlineForm[roundNumber];
+      if (!deadline) {
+        setToast({ message: 'Please select a deadline', type: 'error' });
+        return;
+      }
+      await api.updatePickDeadline(roundNumber, deadline);
+      setToast({ message: `Round ${roundNumber} deadline updated!`, type: 'success' });
+      const settingsData = await api.getSettings();
+      setSettings(settingsData);
+    } catch (err) {
+      setToast({ message: err.message, type: 'error' });
+    }
+  };
+
+  const handleUpdateQualifiedTeams = async (roundNumber) => {
+    try {
+      const teams = selectedTeams[roundNumber] || [];
+      if (teams.length === 0) {
+        setToast({ message: 'Please select at least one team', type: 'error' });
+        return;
+      }
+      await api.setQualifiedTeams(roundNumber, teams);
+      setToast({ message: `Round ${roundNumber} teams updated!`, type: 'success' });
+    } catch (err) {
+      setToast({ message: err.message, type: 'error' });
+    }
+  };
+
+  const toggleTeamSelection = (roundNumber, teamAbbrev) => {
+    const current = selectedTeams[roundNumber] || [];
+    const updated = current.includes(teamAbbrev)
+      ? current.filter(t => t !== teamAbbrev)
+      : [...current, teamAbbrev];
+    setSelectedTeams({ ...selectedTeams, [roundNumber]: updated });
+  };
 
   const currentRoster = rosters[pickRound] || { western: { forwards: [], defense: [], goalies: [] }, eastern: { forwards: [], defense: [], goalies: [] } };
   const uniqueTeams = useMemo(() => [...new Set(players.map(p => p.team))].sort(), [players]);
@@ -1002,28 +1090,116 @@ function AppContent() {
 
       <Modal isOpen={adminModal} onClose={() => setAdminModal(false)} title="Admin Panel">
         <div className="space-y-4">
-          <div><label className="block text-gray-300 text-sm mb-2">Current Round</label>
-            <select value={settings.currentRound} onChange={async (e) => { const r = parseInt(e.target.value); await api.updateSettings({ currentRound: r }); setSettings({ ...settings, currentRound: r }); }} className="w-full bg-slate-700 border border-slate-600 rounded-lg px-4 py-2 text-white">
-              <option value={1}>Round 1</option><option value={2}>Round 2</option><option value={3}>Conference Finals & Cup</option>
-            </select>
+          <div className="flex gap-2 border-b border-slate-700 pb-2">
+            <button 
+              onClick={() => setAdminTab('general')}
+              className={`px-4 py-2 rounded-t-lg font-semibold text-sm ${adminTab === 'general' ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-white'}`}>
+              General
+            </button>
+            <button 
+              onClick={() => setAdminTab('deadlines')}
+              className={`px-4 py-2 rounded-t-lg font-semibold text-sm ${adminTab === 'deadlines' ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-white'}`}>
+              Deadlines
+            </button>
+            <button 
+              onClick={() => setAdminTab('teams')}
+              className={`px-4 py-2 rounded-t-lg font-semibold text-sm ${adminTab === 'teams' ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-white'}`}>
+              Teams
+            </button>
           </div>
-          <button onClick={handleRefreshStats} disabled={isRefreshing} className={`w-full py-2 rounded-lg font-bold ${isRefreshing ? 'bg-slate-700 text-gray-500' : 'bg-blue-600 text-white'}`}>{isRefreshing ? 'Refreshing...' : '🔄 Refresh NHL Stats'}</button>
-          <div className="border-t border-slate-700 pt-4">
-            <h4 className="text-white font-semibold mb-3">Tiebreaker Answers</h4>
-            <p className="text-gray-400 text-sm mb-3">Enter the correct answers after each round completes.</p>
-            <div className="space-y-3">
-              {[1, 2, 3].map(r => (
-                <div key={r} className="bg-slate-700/50 rounded-lg p-3">
-                  <div className="text-gray-400 text-xs uppercase mb-2">Round {r}</div>
-                  <div className="grid grid-cols-2 gap-2">
-                    <input type="number" placeholder="Q1 Answer" className="bg-slate-600 border border-slate-500 rounded px-3 py-1 text-white text-sm" />
-                    <input type="number" placeholder="Q2 Answer" className="bg-slate-600 border border-slate-500 rounded px-3 py-1 text-white text-sm" />
+
+          {adminTab === 'general' && (
+            <div className="space-y-4">
+              <div>
+                <label className="block text-gray-300 text-sm mb-2">Current Round</label>
+                <select 
+                  value={settings.currentRound} 
+                  onChange={async (e) => { 
+                    const r = parseInt(e.target.value); 
+                    await api.updateSettings({ currentRound: r }); 
+                    setSettings({ ...settings, currentRound: r }); 
+                  }} 
+                  className="w-full bg-slate-700 border border-slate-600 rounded-lg px-4 py-2 text-white">
+                  <option value={1}>Round 1</option>
+                  <option value={2}>Round 2</option>
+                  <option value={3}>Conference Finals & Cup</option>
+                </select>
+              </div>
+              <button 
+                onClick={handleRefreshStats} 
+                disabled={isRefreshing} 
+                className={`w-full py-2 rounded-lg font-bold ${isRefreshing ? 'bg-slate-700 text-gray-500' : 'bg-blue-600 text-white'}`}>
+                {isRefreshing ? 'Refreshing...' : '🔄 Refresh NHL Stats'}
+              </button>
+            </div>
+          )}
+
+          {adminTab === 'deadlines' && (
+            <div className="space-y-4">
+              <p className="text-gray-400 text-sm">Set pick deadlines for each round. Users must submit before this time.</p>
+              {[1, 2, 3].map(roundNum => (
+                <div key={roundNum} className="bg-slate-700/50 rounded-lg p-4">
+                  <div className="text-white font-semibold mb-2">{ROUND_NAMES[roundNum]}</div>
+                  <div className="flex gap-2">
+                    <input 
+                      type="datetime-local"
+                      value={deadlineForm[roundNum] || ''}
+                      onChange={e => setDeadlineForm({ ...deadlineForm, [roundNum]: e.target.value })}
+                      className="flex-1 bg-slate-600 border border-slate-500 rounded px-3 py-2 text-white text-sm"
+                    />
+                    <button 
+                      onClick={() => handleUpdateDeadline(roundNum)}
+                      className="bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2 rounded font-bold text-sm">
+                      Update
+                    </button>
                   </div>
+                  {adminRounds.find(r => r.round_number === roundNum)?.pick_deadline && (
+                    <div className="text-gray-400 text-xs mt-2">
+                      Current: {new Date(adminRounds.find(r => r.round_number === roundNum).pick_deadline).toLocaleString()}
+                    </div>
+                  )}
                 </div>
               ))}
-              <button className="w-full bg-emerald-600 text-white py-2 rounded-lg font-bold text-sm">Save Tiebreaker Answers</button>
             </div>
-          </div>
+          )}
+
+          {adminTab === 'teams' && (
+            <div className="space-y-4">
+              <p className="text-gray-400 text-sm">Select which teams qualify for each round.</p>
+              {[1, 2, 3].map(roundNum => (
+                <div key={roundNum} className="bg-slate-700/50 rounded-lg p-4">
+                  <div className="flex items-center justify-between mb-3">
+                    <div className="text-white font-semibold">{ROUND_NAMES[roundNum]}</div>
+                    <div className="text-gray-400 text-xs">
+                      {(selectedTeams[roundNum] || []).length} teams selected
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2 max-h-48 overflow-y-auto mb-3">
+                    {adminTeams.map(team => {
+                      const isSelected = (selectedTeams[roundNum] || []).includes(team.abbrev);
+                      return (
+                        <button
+                          key={team.abbrev}
+                          onClick={() => toggleTeamSelection(roundNum, team.abbrev)}
+                          className={`px-3 py-2 rounded text-sm font-medium text-left transition-colors ${
+                            isSelected 
+                              ? 'bg-blue-600 text-white border border-blue-400' 
+                              : 'bg-slate-600 text-gray-300 hover:bg-slate-500 border border-slate-500'
+                          }`}>
+                          {team.abbrev} - {team.name}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <button 
+                    onClick={() => handleUpdateQualifiedTeams(roundNum)}
+                    className="w-full bg-emerald-600 hover:bg-emerald-500 text-white py-2 rounded font-bold text-sm">
+                    Save Qualified Teams
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       </Modal>
 
