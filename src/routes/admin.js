@@ -141,12 +141,20 @@ router.post('/rounds/:roundNumber/qualified-teams', authenticateToken, verifyAdm
     const roundNumber = parseInt(req.params.roundNumber);
     const { teams } = req.body; // Array of team abbreviations
 
-    if (roundNumber < 1 || roundNumber > 3) {
-      return res.status(400).json({ error: 'Invalid round number' });
+    if (roundNumber < 0 || roundNumber > 3) {
+      return res.status(400).json({ error: 'Invalid round number (must be 0-3)' });
     }
 
     if (!Array.isArray(teams)) {
       return res.status(400).json({ error: 'Teams must be an array' });
+    }
+
+    // Validate team count based on round
+    const maxTeams = roundNumber === 0 ? 32 : roundNumber === 1 ? 16 : roundNumber === 2 ? 8 : 4;
+    if (teams.length !== maxTeams) {
+      return res.status(400).json({ 
+        error: `Round ${roundNumber} requires exactly ${maxTeams} teams (you provided ${teams.length})` 
+      });
     }
 
     await client.query('BEGIN');
@@ -173,7 +181,7 @@ router.post('/rounds/:roundNumber/qualified-teams', authenticateToken, verifyAdm
     await client.query('COMMIT');
 
     res.json({
-      message: 'Qualified teams updated successfully',
+      message: `Successfully set ${teams.length} qualified teams for round ${roundNumber}`,
       roundNumber,
       count: teams.length
     });
