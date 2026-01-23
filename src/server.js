@@ -151,20 +151,20 @@ app.get('/api/fix-rounds', async (req, res) => {
   const pool = require('../config/database');
   
   try {
-    console.log('🔧 Fixing rounds table constraint...');
+    console.log('🔧 Fixing rounds table and settings...');
     
-    // Drop the old constraint
+    // Drop the old constraint on rounds
     await pool.query(`
       ALTER TABLE rounds DROP CONSTRAINT IF EXISTS rounds_round_number_check
     `);
-    console.log('✓ Dropped old constraint');
+    console.log('✓ Dropped old rounds constraint');
     
     // Add new constraint allowing 0-3
     await pool.query(`
       ALTER TABLE rounds ADD CONSTRAINT rounds_round_number_check 
       CHECK (round_number >= 0 AND round_number <= 3)
     `);
-    console.log('✓ Added new constraint (0-3)');
+    console.log('✓ Added new rounds constraint (0-3)');
     
     // Insert testing round
     await pool.query(`
@@ -174,7 +174,7 @@ app.get('/api/fix-rounds', async (req, res) => {
     `);
     console.log('✓ Testing round inserted');
     
-    // Update team_qualifications constraint too
+    // Update team_qualifications constraint
     await pool.query(`
       ALTER TABLE team_qualifications DROP CONSTRAINT IF EXISTS team_qualifications_round_number_check
     `);
@@ -184,13 +184,27 @@ app.get('/api/fix-rounds', async (req, res) => {
     `);
     console.log('✓ Team qualifications constraint updated');
     
+    // Check if settings table has a constraint and remove it if needed
+    const constraintCheck = await pool.query(`
+      SELECT constraint_name 
+      FROM information_schema.table_constraints 
+      WHERE table_name = 'settings' 
+      AND constraint_type = 'CHECK'
+    `);
+    
+    for (const row of constraintCheck.rows) {
+      await pool.query(`ALTER TABLE settings DROP CONSTRAINT IF EXISTS ${row.constraint_name}`);
+      console.log(`✓ Dropped settings constraint: ${row.constraint_name}`);
+    }
+    
     res.json({ 
       success: true, 
-      message: 'Rounds table fixed! Testing round (Round 0) is now available.',
+      message: 'All constraints fixed! Testing round (Round 0) is now fully available.',
       changes: [
-        'Updated round_number constraint to allow 0-3',
+        'Updated rounds constraint to allow 0-3',
+        'Updated team_qualifications constraint to allow 0-3',
         'Inserted Testing Round (Round 0)',
-        'Updated team_qualifications constraint'
+        'Removed any conflicting settings constraints'
       ]
     });
     
