@@ -63,7 +63,7 @@ app.get('/api/migrate', async (req, res) => {
     await pool.query(`
       CREATE TABLE IF NOT EXISTS rounds (
         id SERIAL PRIMARY KEY,
-        round_number INT UNIQUE NOT NULL CHECK (round_number >= 1 AND round_number <= 3),
+        round_number INT UNIQUE NOT NULL CHECK (round_number >= 0 AND round_number <= 3),
         name VARCHAR(100) NOT NULL,
         pick_deadline TIMESTAMP WITH TIME ZONE,
         start_date TIMESTAMP WITH TIME ZONE,
@@ -75,21 +75,22 @@ app.get('/api/migrate', async (req, res) => {
     `);
     console.log('✓ Rounds table created');
 
-    // Insert default rounds
+    // Insert default rounds (including testing round)
     await pool.query(`
       INSERT INTO rounds (round_number, name, pick_deadline) VALUES
+        (0, 'Testing Round', '2026-01-25T12:00:00-05:00'),
         (1, 'First Round', '2026-04-19T19:00:00-04:00'),
         (2, 'Second Round', '2026-05-03T19:00:00-04:00'),
         (3, 'Conference Finals & Cup Final', '2026-05-17T19:00:00-04:00')
       ON CONFLICT (round_number) DO NOTHING
     `);
-    console.log('✓ Default rounds inserted');
+    console.log('✓ Default rounds inserted (including testing round)');
 
     // Create team_qualifications table
     await pool.query(`
       CREATE TABLE IF NOT EXISTS team_qualifications (
         id SERIAL PRIMARY KEY,
-        round_number INT NOT NULL CHECK (round_number >= 1 AND round_number <= 3),
+        round_number INT NOT NULL CHECK (round_number >= 0 AND round_number <= 3),
         team_abbrev VARCHAR(3) NOT NULL REFERENCES teams(abbrev),
         qualified BOOLEAN DEFAULT TRUE,
         created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
