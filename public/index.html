@@ -42,7 +42,7 @@ const TIEBREAKER_QUESTIONS = {
   ]
 };
 
-const getPlayerHeadshot = (nhlId) => \`https://cms.nhl.bamgrid.com/images/headshots/current/168x168/\${nhlId}.jpg\`;
+const getPlayerHeadshot = (nhlId) => `https://cms.nhl.bamgrid.com/images/headshots/current/168x168/${nhlId}.jpg`;
 
 const api = {
   token: localStorage.getItem('netsports-token'),
@@ -53,8 +53,8 @@ const api = {
   },
   async request(endpoint, options = {}) {
     const headers = { 'Content-Type': 'application/json', ...options.headers };
-    if (this.token) headers['Authorization'] = \`Bearer \${this.token}\`;
-    const response = await fetch(\`\${API_URL}\${endpoint}\`, { ...options, headers });
+    if (this.token) headers['Authorization'] = `Bearer ${this.token}`;
+    const response = await fetch(`${API_URL}${endpoint}`, { ...options, headers });
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || 'Request failed');
     return data;
@@ -80,21 +80,20 @@ const api = {
   async getPlayers() { return this.request('/players'); },
   async getRosters() { return this.request('/rosters'); },
   async saveRoster(round, selections, stars, tiebreakers) {
-    return this.request(\`/rosters/\${round}\`, { method: 'PUT', body: JSON.stringify({ selections, stars, tiebreakers }) });
+    return this.request(`/rosters/${round}`, { method: 'PUT', body: JSON.stringify({ selections, stars, tiebreakers }) });
   },
-  async submitRoster(round) { return this.request(\`/rosters/\${round}/submit\`, { method: 'POST' }); },
+  async submitRoster(round) { return this.request(`/rosters/${round}/submit`, { method: 'POST' }); },
   async getStandings() { return this.request('/standings'); },
   async getSettings() { return this.request('/standings/settings'); },
   async refreshStats() { return this.request('/standings/refresh', { method: 'POST' }); },
   async updateSettings(settings) { return this.request('/standings/settings', { method: 'PUT', body: JSON.stringify(settings) }); },
   async getGroups() { return this.request('/groups'); },
-  async getGroup(id) { return this.request(\`/groups/\${id}\`); },
+  async getGroup(id) { return this.request(`/groups/${id}`); },
   async createGroup(name, description, isPrivate) { return this.request('/groups', { method: 'POST', body: JSON.stringify({ name, description, isPrivate }) }); },
   async joinGroup(code) { return this.request('/groups/join', { method: 'POST', body: JSON.stringify({ code }) }); },
-  async leaveGroup(id) { return this.request(\`/groups/\${id}/leave\`, { method: 'POST' }); },
-  async deleteGroup(id) { return this.request(\`/groups/\${id}\`, { method: 'DELETE' }); },
-  async updateBlast(id, message) { return this.request(\`/groups/\${id}/blast\`, { method: 'PUT', body: JSON.stringify({ message }) }); },
-  async sendChat(groupId, message) { return this.request(\`/groups/\${groupId}/chat\`, { method: 'POST', body: JSON.stringify({ message }) }); }
+  async leaveGroup(id) { return this.request(`/groups/${id}/leave`, { method: 'POST' }); },
+  async deleteGroup(id) { return this.request(`/groups/${id}`, { method: 'DELETE' }); },
+  async sendChat(groupId, message) { return this.request(`/groups/${groupId}/chat`, { method: 'POST', body: JSON.stringify({ message }) }); }
 };
 
 const AuthContext = createContext(null);
@@ -122,7 +121,7 @@ const useAuth = () => useContext(AuthContext);
 
 const Toast = ({ message, type, onClose }) => {
   useEffect(() => { const t = setTimeout(onClose, 3000); return () => clearTimeout(t); }, [onClose]);
-  return <div className={\`fixed bottom-4 right-4 px-6 py-3 rounded-lg shadow-lg z-50 text-white font-medium \${type === 'success' ? 'bg-emerald-600' : 'bg-red-600'}\`}>{message}</div>;
+  return <div className={`fixed bottom-4 right-4 px-6 py-3 rounded-lg shadow-lg z-50 text-white font-medium ${type === 'success' ? 'bg-emerald-600' : 'bg-red-600'}`}>{message}</div>;
 };
 
 const Modal = ({ isOpen, onClose, title, children }) => {
@@ -189,7 +188,7 @@ const CountdownTimer = ({ targetDate, label }) => {
   );
 
   return (
-    <div className={\`bg-gradient-to-r from-blue-600/20 to-purple-600/20 border border-blue-500/30 rounded-xl p-4 \${timeLeft.days === 0 && timeLeft.hours < 24 ? 'countdown-pulse' : ''}\`}>
+    <div className={`bg-gradient-to-r from-blue-600/20 to-purple-600/20 border border-blue-500/30 rounded-xl p-4 ${timeLeft.days === 0 && timeLeft.hours < 24 ? 'countdown-pulse' : ''}`}>
       <div className="text-center mb-3"><span className="text-gray-300 text-sm">{label}</span></div>
       <div className="flex justify-center gap-2">
         <TimeBox value={timeLeft.days} unit="Days" />
@@ -210,16 +209,16 @@ const UpdateBanner = ({ lastUpdate, round, verified, onRefresh, isRefreshing, is
     <div className="bg-slate-800/50 border border-slate-700 rounded-lg px-4 py-3 text-sm">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-2">
-          <div className={\`w-2 h-2 rounded-full \${verified ? 'bg-emerald-500' : 'bg-amber-500 animate-pulse'}\`} />
+          <div className={`w-2 h-2 rounded-full ${verified ? 'bg-emerald-500' : 'bg-amber-500 animate-pulse'}`} />
           <span className="text-gray-400">Current: <span className="text-white font-semibold">{ROUND_NAMES[round] || 'Round 1'}</span></span>
         </div>
         <div className="flex items-center gap-4">
-          <span className={\`px-2 py-0.5 rounded text-xs font-medium \${verified ? 'bg-emerald-600/20 text-emerald-400' : 'bg-amber-600/20 text-amber-400'}\`}>
+          <span className={`px-2 py-0.5 rounded text-xs font-medium ${verified ? 'bg-emerald-600/20 text-emerald-400' : 'bg-amber-600/20 text-amber-400'}`}>
             {verified ? '✓ Verified' : '○ Pending'}
           </span>
           <span className="text-gray-500">Updated: {fmt(lastUpdate)}</span>
           {isAdmin && onRefresh && (
-            <button onClick={onRefresh} disabled={isRefreshing} className={\`px-3 py-1 rounded text-xs font-bold \${isRefreshing ? 'bg-slate-700 text-gray-500' : 'bg-blue-600 text-white hover:bg-blue-500'}\`}>
+            <button onClick={onRefresh} disabled={isRefreshing} className={`px-3 py-1 rounded text-xs font-bold ${isRefreshing ? 'bg-slate-700 text-gray-500' : 'bg-blue-600 text-white hover:bg-blue-500'}`}>
               {isRefreshing ? '⏳...' : '🔄 Refresh'}
             </button>
           )}
@@ -234,13 +233,13 @@ const PlayerImage = ({ player, size = 'md' }) => {
   const sizeClasses = { sm: 'w-10 h-10 text-xs', md: 'w-12 h-12 text-sm', lg: 'w-16 h-16 text-base' };
   if (imgError || !player.nhlId) {
     return (
-      <div className={\`\${sizeClasses[size]} rounded-full flex items-center justify-center text-white font-bold\`} style={{ backgroundColor: player.teamColor || '#333' }}>
+      <div className={`${sizeClasses[size]} rounded-full flex items-center justify-center text-white font-bold`} style={{ backgroundColor: player.teamColor || '#333' }}>
         {player.name.split(' ').map(n => n[0]).join('')}
       </div>
     );
   }
   return (
-    <img src={getPlayerHeadshot(player.nhlId)} alt={player.name} className={\`\${sizeClasses[size]} rounded-full object-cover bg-slate-700\`} onError={() => setImgError(true)} />
+    <img src={getPlayerHeadshot(player.nhlId)} alt={player.name} className={`${sizeClasses[size]} rounded-full object-cover bg-slate-700`} onError={() => setImgError(true)} />
   );
 };
 
@@ -248,14 +247,14 @@ const PlayerCard = ({ player, isSelected, isStar, canSelect, onToggle, onToggleS
   const isGoalie = player.position === 'goalie';
   const stats = player.stats || {};
   const getPts = (r) => {
-    const s = stats[\`r\${r}\`] || {};
+    const s = stats[`r${r}`] || {};
     if (isGoalie) return (s.w || 0) * 2 + (s.so || 0);
     return (s.g || 0) + (s.a || 0);
   };
   const r1 = getPts(1), r2 = getPts(2), r3 = getPts(3), total = r1 + r2 + r3;
   
   return (
-    <div className={\`relative p-4 rounded-xl border-2 transition-all cursor-pointer \${isSelected ? 'bg-slate-700 border-red-500' : canSelect ? 'bg-slate-800/50 border-slate-600 hover:border-slate-400' : 'bg-slate-900/50 border-slate-700 opacity-50 cursor-not-allowed'}\`}
+    <div className={`relative p-4 rounded-xl border-2 transition-all cursor-pointer ${isSelected ? 'bg-slate-700 border-red-500' : canSelect ? 'bg-slate-800/50 border-slate-600 hover:border-slate-400' : 'bg-slate-900/50 border-slate-700 opacity-50 cursor-not-allowed'}`}
       onClick={() => (isSelected || canSelect) && onToggle()}>
       {isSelected && <div className="absolute -top-2 -right-2 w-6 h-6 bg-red-600 rounded-full flex items-center justify-center text-white text-xs">✓</div>}
       {isStar && <div className="absolute -top-2 -left-2 w-6 h-6 bg-yellow-500 rounded-full flex items-center justify-center">⭐</div>}
@@ -267,7 +266,7 @@ const PlayerCard = ({ player, isSelected, isStar, canSelect, onToggle, onToggleS
             <div className="text-gray-400 text-sm">{player.team}</div>
           </div>
         </div>
-        <div className="bg-amber-500 text-black font-black text-sm px-3 py-1 rounded-lg">\${player.cost}</div>
+        <div className="bg-amber-500 text-black font-black text-sm px-3 py-1 rounded-lg">${player.cost}</div>
       </div>
       <div className="grid grid-cols-4 gap-1 pt-3 border-t border-slate-600 text-xs">
         <div className="text-center"><div className="text-gray-500">R1</div><div className="text-white font-bold">{r1}</div></div>
@@ -277,7 +276,7 @@ const PlayerCard = ({ player, isSelected, isStar, canSelect, onToggle, onToggleS
       </div>
       {isSelected && !locked && onToggleStar && (
         <button onClick={e => { e.stopPropagation(); onToggleStar(); }}
-          className={\`mt-3 w-full px-3 py-2 text-xs font-bold rounded-lg \${isStar ? 'bg-yellow-500 text-black' : 'bg-slate-600 text-gray-300 hover:bg-slate-500'}\`}>
+          className={`mt-3 w-full px-3 py-2 text-xs font-bold rounded-lg ${isStar ? 'bg-yellow-500 text-black' : 'bg-slate-600 text-gray-300 hover:bg-slate-500'}`}>
           {isStar ? '⭐ STAR PLAYER' : 'Set as Star'}
         </button>
       )}
@@ -312,9 +311,9 @@ const TiebreakerSection = ({ round, tiebreakers, setTiebreakers, locked }) => {
         {questions.map((question, idx) => (
           <div key={idx}>
             <label className="block text-gray-300 text-sm mb-2">{idx + 1}. {question}</label>
-            <input type="number" min="0" value={tiebreakers[\`q\${idx + 1}\`] || ''} disabled={locked}
-              onChange={(e) => setTiebreakers({ ...tiebreakers, [\`q\${idx + 1}\`]: e.target.value ? parseInt(e.target.value) : null })}
-              className={\`w-full bg-slate-700 border border-slate-600 rounded-lg px-4 py-2 text-white \${locked ? 'opacity-50 cursor-not-allowed' : ''}\`}
+            <input type="number" min="0" value={tiebreakers[`q${idx + 1}`] || ''} disabled={locked}
+              onChange={(e) => setTiebreakers({ ...tiebreakers, [`q${idx + 1}`]: e.target.value ? parseInt(e.target.value) : null })}
+              className={`w-full bg-slate-700 border border-slate-600 rounded-lg px-4 py-2 text-white ${locked ? 'opacity-50 cursor-not-allowed' : ''}`}
               placeholder="Enter your answer" />
           </div>
         ))}
@@ -337,7 +336,7 @@ const MobileMenu = ({ isOpen, onClose, page, setPage, user, setAdminModal }) => 
         <nav className="p-4 space-y-2">
           {navItems.map(p => (
             <button key={p} onClick={() => { setPage(p); onClose(); }}
-              className={\`w-full text-left px-4 py-3 rounded-lg font-bold uppercase \${page === p ? 'bg-red-600 text-white' : 'text-gray-300 hover:bg-slate-700'}\`}>{p}</button>
+              className={`w-full text-left px-4 py-3 rounded-lg font-bold uppercase ${page === p ? 'bg-red-600 text-white' : 'text-gray-300 hover:bg-slate-700'}`}>{p}</button>
           ))}
           {user?.is_admin && (
             <button onClick={() => { setAdminModal(true); onClose(); }}
@@ -362,11 +361,11 @@ function AppContent() {
   const [pendingEmail, setPendingEmail] = useState('');
   const [demoCode, setDemoCode] = useState('');
   const [players, setPlayers] = useState([]);
-  const [settings, setSettings] = useState({ currentRound: 2, lockDates: {}, lastUpdate: null, isVerified: false });
+  const [settings, setSettings] = useState({ currentRound: 1, lockDates: {}, lastUpdate: null, isVerified: false });
   const [standings, setStandings] = useState([]);
   const [groups, setGroups] = useState([]);
   const [rosters, setRosters] = useState({ 1: null, 2: null, 3: null });
-  const [pickRound, setPickRound] = useState(2);
+  const [pickRound, setPickRound] = useState(1);
   const [stars, setStars] = useState({ forward: null, defense: null, goalie: null });
   const [tiebreakers, setTiebreakers] = useState({ q1: null, q2: null });
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -387,13 +386,13 @@ function AppContent() {
   useEffect(() => {
     Promise.all([
       api.getPlayers().catch(() => ({ players: [] })),
-      api.getSettings().catch(() => ({ currentRound: 2, lockDates: {}, lastUpdate: null, isVerified: false })),
+      api.getSettings().catch(() => ({ currentRound: 1, lockDates: {}, lastUpdate: null, isVerified: false })),
       api.getStandings().catch(() => ({ standings: [] }))
     ]).then(([playersData, settingsData, standingsData]) => {
       setPlayers(playersData.players || []);
       setSettings(settingsData);
       setStandings(standingsData.standings || []);
-      setPickRound(settingsData.currentRound || 2);
+      setPickRound(settingsData.currentRound || 1);
       setDataLoading(false);
     });
   }, []);
