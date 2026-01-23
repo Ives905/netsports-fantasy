@@ -145,6 +145,65 @@ app.get('/api/migrate', async (req, res) => {
   }
 });
 
+// FIX EXISTING ROUNDS TABLE - Run this if you get constraint errors
+// Visit: https://your-app.railway.app/api/fix-rounds
+app.get('/api/fix-rounds', async (req, res) => {
+  const pool = require('../config/database');
+  
+  try {
+    console.log('🔧 Fixing rounds table constraint...');
+    
+    // Drop the old constraint
+    await pool.query(`
+      ALTER TABLE rounds DROP CONSTRAINT IF EXISTS rounds_round_number_check
+    `);
+    console.log('✓ Dropped old constraint');
+    
+    // Add new constraint allowing 0-3
+    await pool.query(`
+      ALTER TABLE rounds ADD CONSTRAINT rounds_round_number_check 
+      CHECK (round_number >= 0 AND round_number <= 3)
+    `);
+    console.log('✓ Added new constraint (0-3)');
+    
+    // Insert testing round
+    await pool.query(`
+      INSERT INTO rounds (round_number, name, pick_deadline) 
+      VALUES (0, 'Testing Round', '2026-01-25T12:00:00-05:00')
+      ON CONFLICT (round_number) DO NOTHING
+    `);
+    console.log('✓ Testing round inserted');
+    
+    // Update team_qualifications constraint too
+    await pool.query(`
+      ALTER TABLE team_qualifications DROP CONSTRAINT IF EXISTS team_qualifications_round_number_check
+    `);
+    await pool.query(`
+      ALTER TABLE team_qualifications ADD CONSTRAINT team_qualifications_round_number_check 
+      CHECK (round_number >= 0 AND round_number <= 3)
+    `);
+    console.log('✓ Team qualifications constraint updated');
+    
+    res.json({ 
+      success: true, 
+      message: 'Rounds table fixed! Testing round (Round 0) is now available.',
+      changes: [
+        'Updated round_number constraint to allow 0-3',
+        'Inserted Testing Round (Round 0)',
+        'Updated team_qualifications constraint'
+      ]
+    });
+    
+  } catch (error) {
+    console.error('Fix rounds error:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: error.message,
+      hint: 'Check server logs for details'
+    });
+  }
+});
+
 // ONE-TIME TEAMS MIGRATION ENDPOINT
 // Visit this URL once to add all 32 NHL teams to the database
 // Example: https://your-app.railway.app/api/migrate-teams
