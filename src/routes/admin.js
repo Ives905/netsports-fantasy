@@ -82,6 +82,41 @@ router.put('/rounds/:roundNumber/deadline', authenticateToken, verifyAdmin, asyn
   }
 });
 
+// PUT /api/admin/rounds/:roundNumber/end-date - Update scoring end date
+router.put('/rounds/:roundNumber/end-date', authenticateToken, verifyAdmin, async (req, res) => {
+  try {
+    const roundNumber = parseInt(req.params.roundNumber);
+    const { end_date } = req.body;
+
+    if (roundNumber < 1 || roundNumber > 3) {
+      return res.status(400).json({ error: 'Invalid round number' });
+    }
+
+    if (!end_date) {
+      return res.status(400).json({ error: 'End date is required' });
+    }
+
+    const result = await pool.query(`
+      UPDATE rounds
+      SET end_date = $1, updated_at = NOW()
+      WHERE round_number = $2
+      RETURNING id, round_number, name, end_date
+    `, [end_date, roundNumber]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Round not found' });
+    }
+
+    res.json({
+      message: 'End date updated successfully',
+      round: result.rows[0]
+    });
+  } catch (error) {
+    console.error('Error updating end date:', error);
+    res.status(500).json({ error: 'Failed to update end date' });
+  }
+});
+
 // GET /api/admin/teams - Get all teams for qualification management
 router.get('/teams', authenticateToken, verifyAdmin, async (req, res) => {
   try {
