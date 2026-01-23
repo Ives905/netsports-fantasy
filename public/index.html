@@ -99,6 +99,9 @@ const api = {
   async updatePickDeadline(roundNumber, deadline) {
     return this.request(`/admin/rounds/${roundNumber}/deadline`, { method: 'PUT', body: JSON.stringify({ pick_deadline: deadline }) });
   },
+  async updateEndDate(roundNumber, endDate) {
+    return this.request(`/admin/rounds/${roundNumber}/end-date`, { method: 'PUT', body: JSON.stringify({ end_date: endDate }) });
+  },
   async setQualifiedTeams(roundNumber, teams) {
     return this.request(`/admin/rounds/${roundNumber}/qualified-teams`, { method: 'POST', body: JSON.stringify({ teams }) });
   }
@@ -406,6 +409,7 @@ function AppContent() {
   const [adminRounds, setAdminRounds] = useState([]);
   const [adminTeams, setAdminTeams] = useState([]);
   const [deadlineForm, setDeadlineForm] = useState({});
+  const [endDateForm, setEndDateForm] = useState({});
   const [selectedTeams, setSelectedTeams] = useState({});
 
   useEffect(() => {
@@ -459,11 +463,15 @@ function AppContent() {
         setAdminRounds(roundsData.rounds || []);
         setAdminTeams(teamsData.teams || []);
         const deadlines = {};
+        const endDates = {};
         (roundsData.rounds || []).forEach(r => {
           deadlines[r.round_number] = r.pick_deadline ? 
             new Date(r.pick_deadline).toISOString().slice(0, 16) : '';
+          endDates[r.round_number] = r.end_date ? 
+            new Date(r.end_date).toISOString().slice(0, 16) : '';
         });
         setDeadlineForm(deadlines);
+        setEndDateForm(endDates);
         const teams = {};
         (roundsData.rounds || []).forEach(r => {
           teams[r.round_number] = (r.qualifiedTeams || [])
@@ -486,6 +494,20 @@ function AppContent() {
       setToast({ message: `Round ${roundNumber} deadline updated!`, type: 'success' });
       const settingsData = await api.getSettings();
       setSettings(settingsData);
+    } catch (err) {
+      setToast({ message: err.message, type: 'error' });
+    }
+  };
+
+  const handleUpdateEndDate = async (roundNumber) => {
+    try {
+      const endDate = endDateForm[roundNumber];
+      if (!endDate) {
+        setToast({ message: 'Please select an end date', type: 'error' });
+        return;
+      }
+      await api.updateEndDate(roundNumber, endDate);
+      setToast({ message: `Round ${roundNumber} end date updated!`, type: 'success' });
     } catch (err) {
       setToast({ message: err.message, type: 'error' });
     }
@@ -1136,28 +1158,54 @@ function AppContent() {
 
           {adminTab === 'deadlines' && (
             <div className="space-y-4">
-              <p className="text-gray-400 text-sm">Set pick deadlines for each round. Users must submit before this time.</p>
+              <p className="text-gray-400 text-sm">Set pick deadlines and scoring end dates for each round.</p>
               {[1, 2, 3].map(roundNum => (
                 <div key={roundNum} className="bg-slate-700/50 rounded-lg p-4">
-                  <div className="text-white font-semibold mb-2">{ROUND_NAMES[roundNum]}</div>
-                  <div className="flex gap-2">
-                    <input 
-                      type="datetime-local"
-                      value={deadlineForm[roundNum] || ''}
-                      onChange={e => setDeadlineForm({ ...deadlineForm, [roundNum]: e.target.value })}
-                      className="flex-1 bg-slate-600 border border-slate-500 rounded px-3 py-2 text-white text-sm"
-                    />
-                    <button 
-                      onClick={() => handleUpdateDeadline(roundNum)}
-                      className="bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2 rounded font-bold text-sm">
-                      Update
-                    </button>
-                  </div>
-                  {adminRounds.find(r => r.round_number === roundNum)?.pick_deadline && (
-                    <div className="text-gray-400 text-xs mt-2">
-                      Current: {new Date(adminRounds.find(r => r.round_number === roundNum).pick_deadline).toLocaleString()}
+                  <div className="text-white font-semibold mb-3">{ROUND_NAMES[roundNum]}</div>
+                  
+                  <div className="mb-3">
+                    <label className="block text-gray-300 text-xs mb-1">Pick Deadline</label>
+                    <div className="flex gap-2">
+                      <input 
+                        type="datetime-local"
+                        value={deadlineForm[roundNum] || ''}
+                        onChange={e => setDeadlineForm({ ...deadlineForm, [roundNum]: e.target.value })}
+                        className="flex-1 bg-slate-600 border border-slate-500 rounded px-3 py-2 text-white text-sm"
+                      />
+                      <button 
+                        onClick={() => handleUpdateDeadline(roundNum)}
+                        className="bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2 rounded font-bold text-sm">
+                        Update
+                      </button>
                     </div>
-                  )}
+                    {adminRounds.find(r => r.round_number === roundNum)?.pick_deadline && (
+                      <div className="text-gray-400 text-xs mt-1">
+                        Current: {new Date(adminRounds.find(r => r.round_number === roundNum).pick_deadline).toLocaleString()}
+                      </div>
+                    )}
+                  </div>
+
+                  <div>
+                    <label className="block text-gray-300 text-xs mb-1">Scoring End Date</label>
+                    <div className="flex gap-2">
+                      <input 
+                        type="datetime-local"
+                        value={endDateForm[roundNum] || ''}
+                        onChange={e => setEndDateForm({ ...endDateForm, [roundNum]: e.target.value })}
+                        className="flex-1 bg-slate-600 border border-slate-500 rounded px-3 py-2 text-white text-sm"
+                      />
+                      <button 
+                        onClick={() => handleUpdateEndDate(roundNum)}
+                        className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded font-bold text-sm">
+                        Update
+                      </button>
+                    </div>
+                    {adminRounds.find(r => r.round_number === roundNum)?.end_date && (
+                      <div className="text-gray-400 text-xs mt-1">
+                        Current: {new Date(adminRounds.find(r => r.round_number === roundNum).end_date).toLocaleString()}
+                      </div>
+                    )}
+                  </div>
                 </div>
               ))}
             </div>
@@ -1174,19 +1222,26 @@ function AppContent() {
                       {(selectedTeams[roundNum] || []).length} teams selected
                     </div>
                   </div>
-                  <div className="grid grid-cols-2 gap-2 max-h-48 overflow-y-auto mb-3">
+                  <div className="grid grid-cols-4 gap-2 max-h-64 overflow-y-auto mb-3 p-2">
                     {adminTeams.map(team => {
                       const isSelected = (selectedTeams[roundNum] || []).includes(team.abbrev);
                       return (
                         <button
                           key={team.abbrev}
                           onClick={() => toggleTeamSelection(roundNum, team.abbrev)}
-                          className={`px-3 py-2 rounded text-sm font-medium text-left transition-colors ${
+                          className={`flex flex-col items-center justify-center p-2 rounded transition-all ${
                             isSelected 
-                              ? 'bg-blue-600 text-white border border-blue-400' 
-                              : 'bg-slate-600 text-gray-300 hover:bg-slate-500 border border-slate-500'
-                          }`}>
-                          {team.abbrev} - {team.name}
+                              ? 'bg-blue-600 text-white ring-2 ring-blue-400' 
+                              : 'bg-slate-600 text-gray-300 hover:bg-slate-500'
+                          }`}
+                          title={team.name}>
+                          <img 
+                            src={`https://assets.nhle.com/logos/nhl/svg/${team.abbrev}_light.svg`}
+                            alt={team.abbrev}
+                            className="w-8 h-8 mb-1"
+                            onError={e => e.target.style.display = 'none'}
+                          />
+                          <span className="text-xs font-bold">{team.abbrev}</span>
                         </button>
                       );
                     })}
