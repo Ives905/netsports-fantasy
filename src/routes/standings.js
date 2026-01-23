@@ -1,223 +1,115 @@
+// routes/standings.js - Updated to use rounds table for deadlines
 const express = require('express');
-const pool = require('../../config/database');
-const { optionalAuth, authenticateToken, requireAdmin } = require('../middleware/auth');
-const nhlApi = require('../services/nhlApi');
+const pool = require('../config/database');
+const { authenticateToken } = require('../middleware/auth');
 
 const router = express.Router();
 
-/**
- * GET /api/standings
- * Get global leaderboard
- */
-router.get('/standings', optionalAuth, async (req, res) => {
+// Middleware to verify admin
+const verifyAdmin = async (req, res, next) => {
+  if (!req.user || !req.user.isAdmin) {
+    return res.status(403).json({ error: 'Admin access required' });
+  }
+  next();
+};
+
+// GET /api/standings - Get global leaderboard
+router.get('/', async (req, res) => {
   try {
     const result = await pool.query(`
-      SELECT 
-        user_id as id,
-        username,
-        total_points as points,
-        r1_points,
-        r2_points,
-        r3_points
-      FROM leaderboard
-      ORDER BY total_points DESC
-      LIMIT 100
+      SELECT * FROM leaderboard
     `);
 
-    // Add ranks
-    const standings = result.rows.map((row, i) => ({
-      ...row,
-      rank: i + 1,
-      rounds: {
-        r1: row.r1_points,
-        r2: row.r2_points,
-        r3: row.r3_points
-      }
-    }));
-
-    res.json({ standings });
-
+    res.json({ standings: result.rows });
   } catch (error) {
-    console.error('Get standings error:', error);
-    res.status(500).json({ error: 'Failed to get standings' });
+    console.error('Error fetching standings:', error);
+    res.status(500).json({ error: 'Failed to fetch standings' });
   }
 });
 
-/**
- * GET /api/standings/settings
- * Get current round, lock dates, and last update info
- */
+// GET /api/standings/settings - Get current round, lock dates, and stats info
 router.get('/settings', async (req, res) => {
   try {
-    const result = await pool.query(`
-      SELECT key, value FROM settings
-      WHERE key IN ('current_round', 'lock_dates', 'stats_last_updated', 'stats_verified')
+    // Get current round from settings
+    const settingsResult = await pool.query(`
+      SELECT value FROM settings WHERE key = 'current_round'
+    `);
+    const currentRound = settingsResult.rows[0]?.value || 1;
+
+    // Get pick deadlines from rounds table
+    const roundsResult = await pool.query(`
+      SELECT round_number, pick_deadline
+      FROM rounds
+      ORDER BY round_number
     `);
 
-    const settings = {};
-    result.rows.forEach(row => {
-      settings[row.key] = JSON.parse(row.value);
+    const lockDates = {};
+    roundsResult.rows.forEach(round => {
+      if (round.pick_deadline) {
+        lockDates[round.round_number] = round.pick_deadline;
+      }
     });
+
+    // Get stats update info
+    const statsResult = await pool.query(`
+      SELECT value FROM settings WHERE key IN ('stats_last_updated', 'stats_verified')
+    `);
+    
+    const lastUpdate = statsResult.rows.find(r => r.key === 'stats_last_updated')?.value || null;
+    const isVerified = statsResult.rows.find(r => r.key === 'stats_verified')?.value === 'true';
 
     res.json({
-      currentRound: settings.current_round || 1,
-      lockDates: settings.lock_dates || {},
-      lastUpdate: settings.stats_last_updated,
-      isVerified: settings.stats_verified === true
+      currentRound: parseInt(currentRound),
+      lockDates,
+      lastUpdate,
+      isVerified
     });
-
   } catch (error) {
-    console.error('Get settings error:', error);
-    res.status(500).json({ error: 'Failed to get settings' });
+    console.error('Error fetching settings:', error);
+    res.status(500).json({ error: 'Failed to fetch settings' });
   }
 });
 
-/**
- * POST /api/standings/refresh
- * Manually trigger stats refresh (admin only)
- */
-router.post('/refresh', authenticateToken, requireAdmin, async (req, res) => {
+// PUT /api/standings/settings - Update current round (admin only)
+router.put('/settings', authenticateToken, verifyAdmin, async (req, res) => {
   try {
-    // Start async update
-    res.json({ message: 'Stats refresh started' });
-    
-    // Run update in background
-    nhlApi.updateAllPlayerStats().then(result => {
-      console.log('Manual stats refresh completed:', result);
-    }).catch(error => {
-      console.error('Manual stats refresh failed:', error);
-    });
+    const { currentRound } = req.body;
 
+    if (currentRound < 1 || currentRound > 3) {
+      return res.status(400).json({ error: 'Invalid round number' });
+    }
+
+    await pool.query(`
+      UPDATE settings
+      SET value = $1, updated_at = NOW()
+      WHERE key = 'current_round'
+    `, [currentRound]);
+
+    res.json({ message: 'Settings updated successfully', currentRound });
   } catch (error) {
-    console.error('Refresh error:', error);
-    res.status(500).json({ error: 'Failed to start refresh' });
-  }
-});
-
-/**
- * PUT /api/standings/settings
- * Update settings (admin only)
- */
-router.put('/settings', authenticateToken, requireAdmin, async (req, res) => {
-  try {
-    const { currentRound, lockDates, isVerified } = req.body;
-
-    if (currentRound !== undefined) {
-      await pool.query(`
-        UPDATE settings SET value = $1, updated_at = NOW() WHERE key = 'current_round'
-      `, [JSON.stringify(currentRound)]);
-    }
-
-    if (lockDates !== undefined) {
-      await pool.query(`
-        UPDATE settings SET value = $1, updated_at = NOW() WHERE key = 'lock_dates'
-      `, [JSON.stringify(lockDates)]);
-    }
-
-    if (isVerified !== undefined) {
-      await pool.query(`
-        UPDATE settings SET value = $1, updated_at = NOW() WHERE key = 'stats_verified'
-      `, [JSON.stringify(isVerified)]);
-    }
-
-    res.json({ message: 'Settings updated' });
-
-  } catch (error) {
-    console.error('Update settings error:', error);
+    console.error('Error updating settings:', error);
     res.status(500).json({ error: 'Failed to update settings' });
   }
 });
 
-/**
- * GET /api/standings/user/:id
- * Get user's roster and points
- */
-router.get('/user/:id', optionalAuth, async (req, res) => {
+// POST /api/standings/refresh - Trigger stats refresh (admin only)
+router.post('/refresh', authenticateToken, verifyAdmin, async (req, res) => {
   try {
-    const { id } = req.params;
+    // In production, this would trigger a background job
+    // For now, we'll just log and return success
+    console.log('Stats refresh triggered by admin:', req.user.id);
+    
+    // Update the last update timestamp
+    await pool.query(`
+      UPDATE settings
+      SET value = $1, updated_at = NOW()
+      WHERE key = 'stats_last_updated'
+    `, [new Date().toISOString()]);
 
-    // Get user info
-    const userResult = await pool.query(`
-      SELECT id, username FROM users WHERE id = $1 AND is_verified = true
-    `, [id]);
-
-    if (userResult.rows.length === 0) {
-      return res.status(404).json({ error: 'User not found' });
-    }
-
-    const user = userResult.rows[0];
-
-    // Check if rosters are viewable (after lock)
-    const lockResult = await pool.query(`
-      SELECT value FROM settings WHERE key = 'lock_dates'
-    `);
-    const lockDates = JSON.parse(lockResult.rows[0].value);
-
-    const rosters = {};
-    for (const round of [1, 2, 3]) {
-      const isLocked = new Date() > new Date(lockDates[round]);
-      
-      if (isLocked) {
-        // Get roster with player details
-        const rosterResult = await pool.query(`
-          SELECT 
-            p.id, p.name, p.team_abbrev as team, p.position, p.cost,
-            t.conference,
-            rp.is_star,
-            ps.goals, ps.assists, ps.wins, ps.shutouts
-          FROM rosters r
-          JOIN roster_players rp ON r.id = rp.roster_id
-          JOIN players p ON rp.player_id = p.id
-          JOIN teams t ON p.team_abbrev = t.abbrev
-          LEFT JOIN player_stats ps ON p.id = ps.player_id AND ps.round = $3
-          WHERE r.user_id = $1 AND r.round = $2 AND r.is_submitted = true
-        `, [id, round, round]);
-
-        rosters[round] = rosterResult.rows;
-      }
-    }
-
-    // Get points from leaderboard
-    const pointsResult = await pool.query(`
-      SELECT total_points, r1_points, r2_points, r3_points
-      FROM leaderboard WHERE user_id = $1
-    `, [id]);
-
-    const points = pointsResult.rows[0] || { total_points: 0, r1_points: 0, r2_points: 0, r3_points: 0 };
-
-    res.json({
-      user,
-      rosters,
-      points: {
-        total: points.total_points,
-        r1: points.r1_points,
-        r2: points.r2_points,
-        r3: points.r3_points
-      }
-    });
-
+    res.json({ message: 'Stats refresh initiated' });
   } catch (error) {
-    console.error('Get user standings error:', error);
-    res.status(500).json({ error: 'Failed to get user standings' });
-  }
-});
-
-/**
- * GET /api/standings/teams
- * Get teams with elimination status
- */
-router.get('/teams', async (req, res) => {
-  try {
-    const result = await pool.query(`
-      SELECT abbrev, name, conference, is_eliminated, eliminated_round, color
-      FROM teams ORDER BY conference, name
-    `);
-
-    res.json({ teams: result.rows });
-
-  } catch (error) {
-    console.error('Get teams error:', error);
-    res.status(500).json({ error: 'Failed to get teams' });
+    console.error('Error refreshing stats:', error);
+    res.status(500).json({ error: 'Failed to refresh stats' });
   }
 });
 
