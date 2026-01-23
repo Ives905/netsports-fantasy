@@ -34,7 +34,7 @@ router.get('/settings', async (req, res) => {
     const settingsResult = await pool.query(`
       SELECT value FROM settings WHERE key = 'current_round'
     `);
-    const currentRound = settingsResult.rows[0]?.value || 1;
+    const currentRound = settingsResult.rows[0]?.value || 0;
 
     // Get pick deadlines from rounds table
     const roundsResult = await pool.query(`
