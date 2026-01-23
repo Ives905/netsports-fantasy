@@ -1,6 +1,6 @@
 // routes/standings.js - Updated to use rounds table for deadlines
 const express = require('express');
-const pool = require('../config/database');
+const pool = require('../../config/database');
 const { authenticateToken } = require('../middleware/auth');
 
 const router = express.Router();
