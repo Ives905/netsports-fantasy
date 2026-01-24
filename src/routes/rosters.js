@@ -119,7 +119,13 @@ router.put('/:round', authenticateToken, async (req, res) => {
     res.json({ message: 'Roster saved successfully' });
   } catch (error) {
     console.error('Save roster error:', error);
-    res.status(500).json({ error: 'Failed to save roster' });
+    if (error.code === '23503') {
+      return res.status(400).json({ error: 'Invalid player selection - one or more players not found' });
+    }
+    if (error.code === '23505') {
+      return res.status(400).json({ error: 'Duplicate player detected' });
+    }
+    res.status(500).json({ error: error.message || 'Failed to save roster. Please try again.' });
   }
 });
 
