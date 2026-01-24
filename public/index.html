@@ -42,7 +42,7 @@ const TIEBREAKER_QUESTIONS = {
   ]
 };
 
-const getPlayerHeadshot = (nhlId) => `https://assets.nhle.com/mugs/nhl/20242025/${nhlId}.png`;
+const getPlayerHeadshot = (nhlId) => `https://assets.nhle.com/mugs/nhl/20252026/${nhlId}.png`;
 
 const api = {
   token: localStorage.getItem('netsports-token'),
@@ -333,6 +333,12 @@ const PlayerFilter = ({ searchTerm, setSearchTerm, teamFilter, setTeamFilter, te
 
 const TiebreakerSection = ({ round, tiebreakers, setTiebreakers, locked }) => {
   const questions = TIEBREAKER_QUESTIONS[round] || [];
+  
+  const handleTiebreakerChange = (idx, value) => {
+    // Prevent page scroll during input
+    setTiebreakers({ ...tiebreakers, [`q${idx + 1}`]: value ? parseInt(value) : null });
+  };
+  
   return (
     <div className="bg-slate-800 rounded-xl p-6 mb-8">
       <h3 className="text-xl font-bold text-white mb-4">🎯 Tiebreaker Questions</h3>
@@ -341,10 +347,17 @@ const TiebreakerSection = ({ round, tiebreakers, setTiebreakers, locked }) => {
         {questions.map((question, idx) => (
           <div key={idx}>
             <label className="block text-gray-300 text-sm mb-2">{idx + 1}. {question}</label>
-            <input type="number" min="0" value={tiebreakers[`q${idx + 1}`] || ''} disabled={locked}
-              onChange={(e) => setTiebreakers({ ...tiebreakers, [`q${idx + 1}`]: e.target.value ? parseInt(e.target.value) : null })}
+            <input 
+              type="number" 
+              inputMode="numeric"
+              min="0" 
+              value={tiebreakers[`q${idx + 1}`] || ''} 
+              disabled={locked}
+              onChange={(e) => handleTiebreakerChange(idx, e.target.value)}
+              onFocus={(e) => e.target.scrollIntoView({ behavior: 'smooth', block: 'center' })}
               className={`w-full bg-slate-700 border border-slate-600 rounded-lg px-4 py-2 text-white ${locked ? 'opacity-50 cursor-not-allowed' : ''}`}
-              placeholder="Enter your answer" />
+              placeholder="Enter your answer" 
+            />
           </div>
         ))}
       </div>
@@ -406,6 +419,7 @@ function AppContent() {
   const [accModal, setAccModal] = useState(false);
   const [adminModal, setAdminModal] = useState(false);
   const [viewRosterModal, setViewRosterModal] = useState(false);
+  const [errorModal, setErrorModal] = useState({ open: false, title: '', message: '' });
   const [viewingUser, setViewingUser] = useState(null);
   const [viewingRoster, setViewingRoster] = useState(null);
   const [createGrpModal, setCreateGrpModal] = useState(false);
@@ -494,6 +508,22 @@ function AppContent() {
     }
   }, [adminModal, user]);
 
+  const convertLocalToEST = (datetimeLocal) => {
+    // datetime-local gives us "2026-01-26T13:00"
+    // We need to treat this as EST and convert to ISO format
+    // EST is UTC-5, EDT is UTC-4
+    const date = new Date(datetimeLocal);
+    // Format as ISO with EST timezone offset
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    const hours = String(date.getHours()).padStart(2, '0');
+    const minutes = String(date.getMinutes()).padStart(2, '0');
+    const seconds = '00';
+    // Return in format: YYYY-MM-DDTHH:mm:ss-05:00 (EST)
+    return `${year}-${month}-${day}T${hours}:${minutes}:${seconds}-05:00`;
+  };
+
   const handleUpdateDeadline = async (roundNumber) => {
     try {
       const deadline = deadlineForm[roundNumber];
@@ -501,10 +531,14 @@ function AppContent() {
         setToast({ message: 'Please select a deadline', type: 'error' });
         return;
       }
-      await api.updatePickDeadline(roundNumber, deadline);
+      const estDeadline = convertLocalToEST(deadline);
+      await api.updatePickDeadline(roundNumber, estDeadline);
       setToast({ message: `Round ${roundNumber} deadline updated!`, type: 'success' });
       const settingsData = await api.getSettings();
       setSettings(settingsData);
+      // Reload admin rounds to show updated value
+      const adminData = await api.getAdminRounds();
+      setAdminRounds(adminData.rounds || []);
     } catch (err) {
       setToast({ message: err.message, type: 'error' });
     }
@@ -517,8 +551,12 @@ function AppContent() {
         setToast({ message: 'Please select an end date', type: 'error' });
         return;
       }
-      await api.updateEndDate(roundNumber, endDate);
+      const estEndDate = convertLocalToEST(endDate);
+      await api.updateEndDate(roundNumber, estEndDate);
       setToast({ message: `Round ${roundNumber} end date updated!`, type: 'success' });
+      // Reload admin rounds to show updated value
+      const adminData = await api.getAdminRounds();
+      setAdminRounds(adminData.rounds || []);
     } catch (err) {
       setToast({ message: err.message, type: 'error' });
     }
@@ -638,13 +676,29 @@ function AppContent() {
     } catch (err) { setPasswordErr(err.message); }
   };
 
-  const handleViewUserRoster = async (userId, username) => {
+  const handleViewUserRoster = async (userId, username, round = null) => {
     try {
-      const data = await api.getUserRoster(userId, settings.currentRound);
+      const targetRound = round !== null ? round : settings.currentRound;
+      
+      // Check if deadline has passed for this round (picks are secret until locked)
+      const deadline = settings.lockDates[targetRound];
+      if (deadline && new Date() < new Date(deadline)) {
+        setToast({ message: 'Picks are hidden until the deadline passes', type: 'error' });
+        return;
+      }
+      
+      const data = await api.getUserRoster(userId, targetRound);
+      
+      if (!data.roster) {
+        setToast({ message: `${username} hasn't submitted picks for this round yet`, type: 'info' });
+        return;
+      }
+      
       setViewingUser({ id: userId, username });
       setViewingRoster(data.roster);
       setViewRosterModal(true);
     } catch (err) {
+      console.error('View roster error:', err);
       setToast({ message: err.message || 'Failed to load roster', type: 'error' });
     }
   };
@@ -680,7 +734,14 @@ function AppContent() {
     try {
       await api.saveRoster(pickRound, currentRoster, stars, tiebreakers);
       setToast({ message: 'Roster saved!', type: 'success' });
-    } catch (err) { setToast({ message: err.message, type: 'error' }); }
+    } catch (err) { 
+      console.error('Save roster error:', err);
+      setErrorModal({ 
+        open: true, 
+        title: 'Failed to Save Roster', 
+        message: err.message || 'An unknown error occurred. Please try again.' 
+      });
+    }
   };
 
   const submitRoster = async () => {
@@ -691,7 +752,14 @@ function AppContent() {
       setToast({ message: 'Roster submitted!', type: 'success' });
       const standingsData = await api.getStandings();
       setStandings(standingsData.standings || []);
-    } catch (err) { setToast({ message: err.message, type: 'error' }); }
+    } catch (err) { 
+      console.error('Submit roster error:', err);
+      setErrorModal({ 
+        open: true, 
+        title: 'Failed to Submit Roster', 
+        message: err.message || 'An unknown error occurred. Please try again.' 
+      });
+    }
   };
 
   const createGroup = async (e) => {
@@ -950,7 +1018,7 @@ function AppContent() {
                   <td className="px-4 py-3 text-center text-gray-400">{e.rounds?.r2 || 0}</td>
                   <td className="px-4 py-3 text-center text-gray-400">{e.rounds?.r3 || 0}</td>
                   <td className="px-4 py-3 text-center text-amber-400 font-bold">{e.points}</td>
-                  <td className="px-4 py-3 text-center"><button onClick={() => handleViewUserRoster(e.id, e.username)} className="text-blue-400 hover:text-blue-300 text-xs font-semibold">View Picks</button></td>
+                  <td className="px-4 py-3 text-center"><button onClick={() => handleViewUserRoster(e.id, e.username)} className="text-blue-400 hover:text-blue-300 text-lg" title="View Picks">🔍</button></td>
                 </tr>
               ))}
               {standings.length === 0 && <tr><td colSpan={7} className="px-4 py-8 text-center text-gray-500">No entries yet</td></tr>}
@@ -1026,6 +1094,7 @@ function AppContent() {
                     <td className="py-2"><div className={`w-6 h-6 rounded-full flex items-center justify-center font-bold text-xs ${i === 0 ? 'bg-amber-500 text-black' : 'bg-slate-600 text-white'}`}>{i + 1}</div></td>
                     <td className="py-2 text-white text-sm">{m.username}</td>
                     <td className="py-2 text-right text-amber-400 font-bold">{m.total_points || 0}</td>
+                    <td className="py-2 text-center"><button onClick={() => handleViewUserRoster(m.id, m.username)} className="text-blue-400 hover:text-blue-300 text-lg" title="View Picks">🔍</button></td>
                   </tr>
                 ))}
               </tbody></table>
@@ -1266,6 +1335,19 @@ function AppContent() {
         ) : (
           <div className="text-center py-8 text-gray-400">No roster found for this round</div>
         )}
+      </Modal>
+
+      <Modal isOpen={errorModal.open} onClose={() => setErrorModal({ open: false, title: '', message: '' })} title={errorModal.title || 'Error'}>
+        <div className="space-y-4">
+          <div className="bg-red-500/20 border border-red-500 rounded-lg p-4">
+            <p className="text-red-400">{errorModal.message}</p>
+          </div>
+          <button 
+            onClick={() => setErrorModal({ open: false, title: '', message: '' })}
+            className="w-full bg-slate-700 hover:bg-slate-600 text-white py-2 rounded-lg font-bold">
+            Close
+          </button>
+        </div>
       </Modal>
 
       <Modal isOpen={adminModal} onClose={() => setAdminModal(false)} title="Admin Panel">
