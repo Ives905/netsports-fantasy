@@ -8,11 +8,11 @@ const SALARY_CAP = 30;
 router.get('/', authenticateToken, async (req, res) => {
   try {
     const rosters = {};
-    for (const round of [1, 2, 3]) {
+    for (const round of [0, 1, 2, 3]) {
       const rosterResult = await pool.query(`
         SELECT r.id, r.round, r.is_submitted, r.submitted_at
         FROM rosters r
-        WHERE r.user_id = $1 AND r.round = $2
+        WHERE r.user_id = $1::uuid AND r.round = $2
       `, [req.user.id, round]);
       if (rosterResult.rows.length > 0) {
         const roster = rosterResult.rows[0];
@@ -59,7 +59,7 @@ router.put('/:round', authenticateToken, async (req, res) => {
   try {
     const round = parseInt(req.params.round);
     const { selections, stars, tiebreakers } = req.body;
-    if (round < 1 || round > 3) {
+    if (round < 0 || round > 3) {
       return res.status(400).json({ error: 'Invalid round' });
     }
     const roundResult = await pool.query('SELECT pick_deadline FROM rounds WHERE round_number = $1', [round]);
@@ -70,7 +70,7 @@ router.put('/:round', authenticateToken, async (req, res) => {
       return res.status(400).json({ error: 'Round is locked' });
     }
     let rosterId;
-    const existingRoster = await pool.query('SELECT id, is_submitted FROM rosters WHERE user_id = $1 AND round = $2', [req.user.id, round]);
+    const existingRoster = await pool.query('SELECT id, is_submitted FROM rosters WHERE user_id = $1::uuid AND round = $2', [req.user.id, round]);
     if (existingRoster.rows.length > 0) {
       if (existingRoster.rows[0].is_submitted) {
         return res.status(400).json({ error: 'Roster already submitted' });
@@ -78,7 +78,7 @@ router.put('/:round', authenticateToken, async (req, res) => {
       rosterId = existingRoster.rows[0].id;
       await pool.query('DELETE FROM roster_players WHERE roster_id = $1', [rosterId]);
     } else {
-      const newRoster = await pool.query('INSERT INTO rosters (user_id, round) VALUES ($1, $2) RETURNING id', [req.user.id, round]);
+      const newRoster = await pool.query('INSERT INTO rosters (user_id, round) VALUES ($1::uuid, $2) RETURNING id', [req.user.id, round]);
       rosterId = newRoster.rows[0].id;
     }
     const allPlayers = [];
@@ -111,7 +111,7 @@ router.put('/:round', authenticateToken, async (req, res) => {
     if (tiebreakers) {
       await pool.query(`
         INSERT INTO tiebreakers (user_id, round, question_1, question_2)
-        VALUES ($1, $2, $3, $4)
+        VALUES ($1::uuid, $2, $3, $4)
         ON CONFLICT (user_id, round) DO UPDATE
         SET question_1 = $3, question_2 = $4
       `, [req.user.id, round, tiebreakers.q1, tiebreakers.q2]);
@@ -132,7 +132,7 @@ router.put('/:round', authenticateToken, async (req, res) => {
 router.post('/:round/submit', authenticateToken, async (req, res) => {
   try {
     const round = parseInt(req.params.round);
-    if (round < 1 || round > 3) {
+    if (round < 0 || round > 3) {
       return res.status(400).json({ error: 'Invalid round' });
     }
     const roundResult = await pool.query('SELECT pick_deadline FROM rounds WHERE round_number = $1', [round]);
@@ -142,7 +142,7 @@ router.post('/:round/submit', authenticateToken, async (req, res) => {
     if (new Date() > new Date(roundResult.rows[0].pick_deadline)) {
       return res.status(400).json({ error: 'Round is locked' });
     }
-    const rosterResult = await pool.query('SELECT id, is_submitted FROM rosters WHERE user_id = $1 AND round = $2', [req.user.id, round]);
+    const rosterResult = await pool.query('SELECT id, is_submitted FROM rosters WHERE user_id = $1::uuid AND round = $2', [req.user.id, round]);
     if (rosterResult.rows.length === 0) {
       return res.status(400).json({ error: 'No roster found' });
     }
@@ -189,9 +189,12 @@ router.get('/user/:userId/round/:round', authenticateToken, async (req, res) => 
   try {
     const userId = parseInt(req.params.userId);
     const round = parseInt(req.params.round);
-    if (!userId || !round || round < 0 || round > 3) {
+    
+    // Check for valid values - note: round 0 is valid (testing round)
+    if (isNaN(userId) || userId <= 0 || isNaN(round) || round < 0 || round > 3) {
       return res.status(400).json({ error: 'Invalid user ID or round' });
     }
+    
     const userResult = await pool.query('SELECT id, username FROM users WHERE id = $1', [userId]);
     if (userResult.rows.length === 0) {
       return res.status(404).json({ error: 'User not found' });
