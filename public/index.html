@@ -337,14 +337,20 @@ const PlayerFilter = ({ searchTerm, setSearchTerm, teamFilter, setTeamFilter, te
 
 const TiebreakerSection = ({ round, tiebreakers, setTiebreakers, locked }) => {
   const questions = TIEBREAKER_QUESTIONS[round] || [];
+  const inputRefs = React.useRef({});
+  const lastFocused = React.useRef(null);
   
   const handleChange = (questionKey, value) => {
+    lastFocused.current = questionKey;
     const newValue = value === '' ? null : parseInt(value);
-    setTiebreakers(prev => {
-      const updated = { ...prev, [questionKey]: newValue };
-      return updated;
-    });
+    setTiebreakers(prev => ({ ...prev, [questionKey]: newValue }));
   };
+  
+  React.useEffect(() => {
+    if (lastFocused.current && inputRefs.current[lastFocused.current]) {
+      inputRefs.current[lastFocused.current].focus();
+    }
+  });
   
   return (
     <div className="bg-slate-800 rounded-xl p-6 mb-8">
@@ -358,6 +364,7 @@ const TiebreakerSection = ({ round, tiebreakers, setTiebreakers, locked }) => {
             <div key={`${round}-${questionKey}`}>
               <label className="block text-gray-300 text-sm mb-2">{idx + 1}. {question}</label>
               <input 
+                ref={(el) => inputRefs.current[questionKey] = el}
                 type="number" 
                 inputMode="numeric"
                 min="0" 
