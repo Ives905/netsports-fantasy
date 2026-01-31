@@ -334,6 +334,14 @@ const PlayerFilter = ({ searchTerm, setSearchTerm, teamFilter, setTeamFilter, te
 const TiebreakerSection = ({ round, tiebreakers, setTiebreakers, locked }) => {
   const questions = TIEBREAKER_QUESTIONS[round] || [];
   
+  const handleChange = (questionKey, value) => {
+    const newValue = value === '' ? null : parseInt(value);
+    setTiebreakers(prev => {
+      const updated = { ...prev, [questionKey]: newValue };
+      return updated;
+    });
+  };
+  
   return (
     <div className="bg-slate-800 rounded-xl p-6 mb-8">
       <h3 className="text-xl font-bold text-white mb-4">🎯 Tiebreaker Questions</h3>
@@ -341,19 +349,17 @@ const TiebreakerSection = ({ round, tiebreakers, setTiebreakers, locked }) => {
       <div className="space-y-4">
         {questions.map((question, idx) => {
           const questionKey = `q${idx + 1}`;
+          const value = tiebreakers[questionKey];
           return (
-            <div key={questionKey}>
+            <div key={`${round}-${questionKey}`}>
               <label className="block text-gray-300 text-sm mb-2">{idx + 1}. {question}</label>
               <input 
                 type="number" 
                 inputMode="numeric"
                 min="0" 
-                value={tiebreakers[questionKey] || ''} 
+                value={value === null || value === undefined ? '' : value} 
                 disabled={locked}
-                onChange={(e) => {
-                  const newValue = e.target.value ? parseInt(e.target.value) : null;
-                  setTiebreakers(prev => ({ ...prev, [questionKey]: newValue }));
-                }}
+                onChange={(e) => handleChange(questionKey, e.target.value)}
                 className={`w-full bg-slate-700 border border-slate-600 rounded-lg px-4 py-2 text-white ${locked ? 'opacity-50 cursor-not-allowed' : ''}`}
                 placeholder="Enter your answer" 
               />
@@ -408,8 +414,8 @@ function AppContent() {
   const [settings, setSettings] = useState({ currentRound: 0, lockDates: {}, lastUpdate: null, isVerified: false });
   const [standings, setStandings] = useState([]);
   const [groups, setGroups] = useState([]);
-  const [rosters, setRosters] = useState({ 1: null, 2: null, 3: null });
-  const [pickRound, setPickRound] = useState(1);
+  const [rosters, setRosters] = useState({ 0: null, 1: null, 2: null, 3: null });
+  const [pickRound, setPickRound] = useState(0);
   const [stars, setStars] = useState({ forward: null, defense: null, goalie: null });
   const [tiebreakers, setTiebreakers] = useState({ q1: null, q2: null });
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -454,9 +460,9 @@ function AppContent() {
   useEffect(() => {
     if (user) {
       api.getRosters().then(data => {
-        const r = { 1: null, 2: null, 3: null };
-        const t = { 1: { q1: null, q2: null }, 2: { q1: null, q2: null }, 3: { q1: null, q2: null } };
-        [1, 2, 3].forEach(round => {
+        const r = { 0: null, 1: null, 2: null, 3: null };
+        const t = { 0: { q1: null, q2: null }, 1: { q1: null, q2: null }, 2: { q1: null, q2: null }, 3: { q1: null, q2: null } };
+        [0, 1, 2, 3].forEach(round => {
           if (data.rosters && data.rosters[round]) r[round] = data.rosters[round].selections;
           if (data.tiebreakers && data.tiebreakers[round]) t[round] = data.tiebreakers[round];
         });
@@ -944,9 +950,9 @@ function AppContent() {
         <div className="text-center mb-8">
           <h1 className="text-4xl font-black text-white mb-2">BUILD YOUR TEAM</h1>
           <div className="flex justify-center gap-2 mb-4">
-            {[1, 2, 3].map(r => (
+            {[0, 1, 2, 3].map(r => (
               <button key={r} onClick={() => !isRoundLocked(r) && setPickRound(r)} className={`px-4 py-2 rounded-lg font-bold text-sm ${pickRound === r ? 'bg-red-600 text-white ring-2 ring-red-400' : 'bg-slate-700 text-gray-300'} ${isRoundLocked(r) ? 'opacity-50 cursor-not-allowed' : ''}`}>
-                {r === 3 ? 'Finals' : `Round ${r}`} {isRoundLocked(r) ? '🔒' : ''}
+                {r === 0 ? 'Testing' : r === 3 ? 'Finals' : `Round ${r}`} {isRoundLocked(r) ? '🔒' : ''}
               </button>
             ))}
           </div>
