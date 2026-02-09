@@ -335,22 +335,44 @@ const PlayerFilter = ({ searchTerm, setSearchTerm, teamFilter, setTeamFilter, te
   </div>
 );
 
-const TiebreakerSection = ({ round, tiebreakers, setTiebreakers, locked }) => {
-  const questions = TIEBREAKER_QUESTIONS[round] || [];
-  const inputRefs = React.useRef({});
-  const lastFocused = React.useRef(null);
-  
-  const handleChange = (questionKey, value) => {
-    lastFocused.current = questionKey;
-    const newValue = value === '' ? null : parseInt(value);
-    setTiebreakers(prev => ({ ...prev, [questionKey]: newValue }));
-  };
+const TiebreakerInput = ({ questionKey, value, locked, onChange }) => {
+  const [localValue, setLocalValue] = React.useState(value === null || value === undefined ? '' : String(value));
   
   React.useEffect(() => {
-    if (lastFocused.current && inputRefs.current[lastFocused.current]) {
-      inputRefs.current[lastFocused.current].focus();
-    }
-  });
+    setLocalValue(value === null || value === undefined ? '' : String(value));
+  }, [value]);
+  
+  const handleChange = (e) => {
+    const newValue = e.target.value;
+    setLocalValue(newValue);
+  };
+  
+  const handleBlur = () => {
+    const numValue = localValue === '' ? null : parseInt(localValue);
+    onChange(questionKey, numValue);
+  };
+  
+  return (
+    <input 
+      type="number" 
+      inputMode="numeric"
+      min="0" 
+      value={localValue} 
+      disabled={locked}
+      onChange={handleChange}
+      onBlur={handleBlur}
+      className={`w-full bg-slate-700 border border-slate-600 rounded-lg px-4 py-2 text-white ${locked ? 'opacity-50 cursor-not-allowed' : ''}`}
+      placeholder="Enter your answer" 
+    />
+  );
+};
+
+const TiebreakerSection = ({ round, tiebreakers, setTiebreakers, locked }) => {
+  const questions = TIEBREAKER_QUESTIONS[round] || [];
+  
+  const handleChange = (questionKey, value) => {
+    setTiebreakers(prev => ({ ...prev, [questionKey]: value }));
+  };
   
   return (
     <div className="bg-slate-800 rounded-xl p-6 mb-8">
@@ -359,20 +381,14 @@ const TiebreakerSection = ({ round, tiebreakers, setTiebreakers, locked }) => {
       <div className="space-y-4">
         {questions.map((question, idx) => {
           const questionKey = `q${idx + 1}`;
-          const value = tiebreakers[questionKey];
           return (
             <div key={`${round}-${questionKey}`}>
               <label className="block text-gray-300 text-sm mb-2">{idx + 1}. {question}</label>
-              <input 
-                ref={(el) => inputRefs.current[questionKey] = el}
-                type="number" 
-                inputMode="numeric"
-                min="0" 
-                value={value === null || value === undefined ? '' : value} 
-                disabled={locked}
-                onChange={(e) => handleChange(questionKey, e.target.value)}
-                className={`w-full bg-slate-700 border border-slate-600 rounded-lg px-4 py-2 text-white ${locked ? 'opacity-50 cursor-not-allowed' : ''}`}
-                placeholder="Enter your answer" 
+              <TiebreakerInput 
+                questionKey={questionKey}
+                value={tiebreakers[questionKey]}
+                locked={locked}
+                onChange={handleChange}
               />
             </div>
           );
