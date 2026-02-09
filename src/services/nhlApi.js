@@ -11,6 +11,112 @@ class NHLApiService {
   }
 
   /**
+   * Fetch and populate ALL NHL players from all 32 teams
+   * This should be run once to initially populate the database
+   */
+  async populateAllPlayers() {
+    let totalPlayers = 0;
+    let newPlayers = 0;
+    
+    try {
+      // Get all teams
+      const standingsResponse = await axios.get(`${NHL_API_BASE}/standings/now`);
+      const allTeams = standingsResponse.data.standings.flatMap(conf => conf.teams || []);
+
+      for (const team of allTeams) {
+        try {
+          const teamAbbrev = team.teamAbbrev?.default || team.teamAbbrev;
+          
+          // Fetch full team roster
+          const rosterUrl = `${NHL_API_BASE}/roster/${teamAbbrev}/current`;
+          const rosterResponse = await axios.get(rosterUrl);
+          const roster = rosterResponse.data;
+
+          // Get all position groups
+          const forwards = roster.forwards || [];
+          const defensemen = roster.defensemen || [];
+          const goalies = roster.goalies || [];
+          
+          const allPlayers = [...forwards, ...defensemen, ...goalies];
+
+          // Insert each player
+          for (const player of allPlayers) {
+            try {
+              const firstName = player.firstName?.default || player.firstName || '';
+              const lastName = player.lastName?.default || player.lastName || '';
+              const fullName = `${firstName} ${lastName}`.trim();
+              
+              // Determine position
+              let position = 'forward';
+              if (player.positionCode === 'G') position = 'goalie';
+              else if (player.positionCode === 'D') position = 'defense';
+              
+              // Calculate cost based on position and player type
+              const cost = this.calculatePlayerCost(player, position);
+
+              const result = await pool.query(`
+                INSERT INTO players (nhl_id, name, position, team_abbrev, cost, is_active)
+                VALUES ($1, $2, $3, $4, $5, true)
+                ON CONFLICT (nhl_id) DO UPDATE
+                SET name = $2, position = $3, team_abbrev = $4, cost = $5, is_active = true
+                RETURNING (xmax = 0) AS inserted
+              `, [player.id, fullName, position, teamAbbrev, cost]);
+              
+              totalPlayers++;
+              if (result.rows[0].inserted) {
+                newPlayers++;
+                console.log(`  ✨ New player added: ${fullName} (${teamAbbrev}, ${position})`);
+              }
+            } catch (playerError) {
+              console.error(`    Error inserting player ${player.id}:`, playerError.message);
+            }
+          }
+
+          // Small delay to avoid rate limiting
+          await this.sleep(200);
+          
+        } catch (teamError) {
+          console.error(`Error fetching roster for team:`, teamError.message);
+        }
+      }
+
+      if (newPlayers > 0) {
+        console.log(`✅ Player check complete: ${newPlayers} new players added (${totalPlayers} total processed)`);
+      } else {
+        console.log(`✓ Player check complete: No new players (${totalPlayers} verified)`);
+      }
+      return { success: true, totalPlayers, newPlayers };
+      
+    } catch (error) {
+      console.error('Error checking for new players:', error);
+      return { success: false, error: error.message };
+    }
+  }
+
+  /**
+   * Calculate player cost based on various factors
+   * You can customize this logic
+   */
+  calculatePlayerCost(player, position) {
+    // Default costs by position
+    const baseCost = {
+      'goalie': 3,
+      'defense': 2,
+      'forward': 2
+    };
+    
+    let cost = baseCost[position] || 2;
+    
+    // Add cost for higher draft picks or skilled players
+    // You can enhance this with actual stats if needed
+    if (player.headshot) cost += 1; // Has headshot = likely regular player
+    
+    // Cap between 0 and 5
+    return Math.min(Math.max(cost, 0), 5);
+  }
+  }
+
+  /**
    * Fetch current playoff schedule to determine round
    */
   async getPlayoffSchedule() {
