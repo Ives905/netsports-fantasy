@@ -10,6 +10,9 @@ const router = express.Router();
  */
 router.get('/', async (req, res) => {
   try {
+    console.log('Fetching players...');
+    
+    // Get players - simplified query without team full_name
     const result = await pool.query(`
       SELECT 
         p.id,
@@ -18,20 +21,26 @@ router.get('/', async (req, res) => {
         p.position,
         p.team_abbrev,
         p.cost,
-        t.conference,
-        t.full_name as team_name
+        t.conference
       FROM players p
-      JOIN teams t ON p.team_abbrev = t.abbrev
+      LEFT JOIN teams t ON p.team_abbrev = t.abbrev
       ORDER BY p.cost DESC, p.name ASC
     `);
 
+    console.log(`Found ${result.rows.length} players`);
+    
     res.json({ 
       players: result.rows,
       count: result.rows.length
     });
   } catch (error) {
     console.error('Get players error:', error);
-    res.status(500).json({ error: 'Failed to fetch players' });
+    console.error('Error details:', error.message);
+    res.status(500).json({ 
+      error: 'Failed to fetch players',
+      message: error.message,
+      detail: error.detail || 'No additional details'
+    });
   }
 });
 
