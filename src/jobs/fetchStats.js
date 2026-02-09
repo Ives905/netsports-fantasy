@@ -12,6 +12,10 @@ async function runStatsUpdate() {
   console.log(`[${new Date().toISOString()}] Starting scheduled stats update...`);
   
   try {
+    // First, check for any new players (call-ups, roster changes)
+    console.log('Checking for new players...');
+    await nhlApi.populateAllPlayers();
+    
     // Update player stats
     const result = await nhlApi.updateAllPlayerStats();
     
