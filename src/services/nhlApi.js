@@ -12,7 +12,7 @@ class NHLApiService {
 
   /**
    * Fetch and populate ALL NHL players from all 32 teams
-   * This should be run once to initially populate the database
+   * Automatically detects new players (call-ups, roster changes)
    */
   async populateAllPlayers() {
     let totalPlayers = 0;
@@ -95,7 +95,6 @@ class NHLApiService {
 
   /**
    * Calculate player cost based on various factors
-   * You can customize this logic
    */
   calculatePlayerCost(player, position) {
     // Default costs by position
@@ -108,12 +107,10 @@ class NHLApiService {
     let cost = baseCost[position] || 2;
     
     // Add cost for higher draft picks or skilled players
-    // You can enhance this with actual stats if needed
     if (player.headshot) cost += 1; // Has headshot = likely regular player
     
     // Cap between 0 and 5
     return Math.min(Math.max(cost, 0), 5);
-  }
   }
 
   /**
