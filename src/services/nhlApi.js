@@ -19,17 +19,44 @@ class NHLApiService {
     let newPlayers = 0;
     
     try {
+      console.log('Fetching NHL standings...');
       // Get all teams
       const standingsResponse = await axios.get(`${NHL_API_BASE}/standings/now`);
+      console.log('Standings response received');
+      
+      if (!standingsResponse.data || !standingsResponse.data.standings) {
+        console.error('Invalid standings response:', standingsResponse.data);
+        return { success: false, error: 'Invalid standings data from NHL API' };
+      }
+      
       const allTeams = standingsResponse.data.standings.flatMap(conf => conf.teams || []);
+      console.log(`Found ${allTeams.length} teams`);
+
+      if (allTeams.length === 0) {
+        console.error('No teams found in standings');
+        return { success: false, error: 'No teams found in NHL standings' };
+      }
 
       for (const team of allTeams) {
         try {
           const teamAbbrev = team.teamAbbrev?.default || team.teamAbbrev;
           
+          if (!teamAbbrev) {
+            console.error('Team has no abbreviation:', team);
+            continue;
+          }
+          
+          console.log(`Fetching roster for ${teamAbbrev}...`);
+          
           // Fetch full team roster
           const rosterUrl = `${NHL_API_BASE}/roster/${teamAbbrev}/current`;
           const rosterResponse = await axios.get(rosterUrl);
+          
+          if (!rosterResponse.data) {
+            console.error(`No roster data for ${teamAbbrev}`);
+            continue;
+          }
+          
           const roster = rosterResponse.data;
 
           // Get all position groups
@@ -38,13 +65,25 @@ class NHLApiService {
           const goalies = roster.goalies || [];
           
           const allPlayers = [...forwards, ...defensemen, ...goalies];
+          
+          console.log(`  ${teamAbbrev}: ${allPlayers.length} players (${forwards.length}F, ${defensemen.length}D, ${goalies.length}G)`);
 
           // Insert each player
           for (const player of allPlayers) {
             try {
+              if (!player.id) {
+                console.error('Player has no ID:', player);
+                continue;
+              }
+              
               const firstName = player.firstName?.default || player.firstName || '';
               const lastName = player.lastName?.default || player.lastName || '';
               const fullName = `${firstName} ${lastName}`.trim();
+              
+              if (!fullName) {
+                console.error('Player has no name:', player);
+                continue;
+              }
               
               // Determine position
               let position = 'forward';
@@ -89,6 +128,7 @@ class NHLApiService {
       
     } catch (error) {
       console.error('Error checking for new players:', error);
+      console.error('Error stack:', error.stack);
       return { success: false, error: error.message };
     }
   }
