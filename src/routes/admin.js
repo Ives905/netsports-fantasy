@@ -229,4 +229,65 @@ router.get('/settings', authenticateToken, verifyAdmin, async (req, res) => {
   }
 });
 
+// POST /api/admin/populate-players - Manually populate all NHL players
+router.post('/populate-players', authenticateToken, verifyAdmin, async (req, res) => {
+  try {
+    console.log('Admin triggered player population...');
+    
+    const nhlApi = require('../services/nhlApi');
+    const result = await nhlApi.populateAllPlayers();
+    
+    if (result.success) {
+      res.json({ 
+        success: true, 
+        totalPlayers: result.totalPlayers,
+        newPlayers: result.newPlayers,
+        message: `Successfully processed ${result.totalPlayers} players. ${result.newPlayers} new players added.`
+      });
+    } else {
+      res.status(500).json({ 
+        success: false, 
+        error: result.error 
+      });
+    }
+  } catch (error) {
+    console.error('Error in populate-players endpoint:', error);
+    res.status(500).json({ error: 'Failed to populate players', details: error.message });
+  }
+});
+
+// POST /api/admin/refresh-stats - Manually trigger full stats update
+router.post('/refresh-stats', authenticateToken, verifyAdmin, async (req, res) => {
+  try {
+    console.log('Admin triggered stats refresh...');
+    
+    const nhlApi = require('../services/nhlApi');
+    
+    // Check for new players first
+    await nhlApi.populateAllPlayers();
+    
+    // Update stats
+    const result = await nhlApi.updateAllPlayerStats();
+    
+    // Update eliminated teams
+    await nhlApi.updateEliminatedTeams();
+    
+    if (result.success) {
+      res.json({ 
+        success: true, 
+        playersUpdated: result.playersUpdated,
+        message: `Successfully updated stats for ${result.playersUpdated} players.`
+      });
+    } else {
+      res.status(500).json({ 
+        success: false, 
+        error: result.errors 
+      });
+    }
+  } catch (error) {
+    console.error('Error in refresh-stats endpoint:', error);
+    res.status(500).json({ error: 'Failed to refresh stats', details: error.message });
+  }
+});
+
 module.exports = router;
