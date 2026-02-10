@@ -10,6 +10,7 @@ const playersRoutes = require('./routes/players');
 const rostersRoutes = require('./routes/rosters');
 const groupsRoutes = require('./routes/groups');
 const standingsRoutes = require('./routes/standings');
+const adminRoutes = require('./routes/admin');
 const { setupScheduledJobs } = require('./jobs/fetchStats');
 
 const app = express();
@@ -57,6 +58,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/players', playersRoutes);
 app.use('/api/rosters', rostersRoutes);
 app.use('/api/groups', groupsRoutes);
+app.use('/api/admin', adminRoutes);
 app.use('/api', standingsRoutes);
 
 // Error handling
