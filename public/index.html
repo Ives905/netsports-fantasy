@@ -319,11 +319,68 @@ const PlayerCard = ({ player, isSelected, isStar, canSelect, onToggle, onToggleS
   );
 };
 
+const SearchInput = ({ value, onChange, placeholder }) => {
+  const [localValue, setLocalValue] = React.useState(value);
+  const debounceTimer = React.useRef(null);
+  
+  React.useEffect(() => {
+    setLocalValue(value);
+  }, [value]);
+  
+  const handleChange = (e) => {
+    const newValue = e.target.value;
+    setLocalValue(newValue);
+    
+    // Debounce the parent update to avoid too many re-renders
+    if (debounceTimer.current) clearTimeout(debounceTimer.current);
+    debounceTimer.current = setTimeout(() => {
+      onChange(newValue);
+    }, 150);
+  };
+  
+  return (
+    <input 
+      type="text" 
+      placeholder={placeholder}
+      value={localValue} 
+      onChange={handleChange}
+      className="w-full bg-slate-700 border border-slate-600 rounded-lg px-4 py-2 pl-10 text-white placeholder-gray-400" 
+    />
+  );
+};
+
+// Reusable text input component that prevents focus loss
+const TextInput = ({ value, onChange, ...props }) => {
+  const [localValue, setLocalValue] = React.useState(value);
+  
+  React.useEffect(() => {
+    setLocalValue(value);
+  }, [value]);
+  
+  const handleChange = (e) => {
+    const newValue = e.target.value;
+    setLocalValue(newValue);
+  };
+  
+  const handleBlur = () => {
+    onChange(localValue);
+  };
+  
+  return (
+    <input 
+      {...props}
+      type="text"
+      value={localValue} 
+      onChange={handleChange}
+      onBlur={handleBlur}
+    />
+  );
+};
+
 const PlayerFilter = ({ searchTerm, setSearchTerm, teamFilter, setTeamFilter, teams }) => (
   <div className="flex flex-col sm:flex-row gap-3 mb-6">
     <div className="flex-1 relative">
-      <input type="text" placeholder="Search players..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)}
-        className="w-full bg-slate-700 border border-slate-600 rounded-lg px-4 py-2 pl-10 text-white placeholder-gray-400" />
+      <SearchInput value={searchTerm} onChange={setSearchTerm} placeholder="Search players..." />
       <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400">🔍</span>
     </div>
     <select value={teamFilter} onChange={(e) => setTeamFilter(e.target.value)} className="bg-slate-700 border border-slate-600 rounded-lg px-4 py-2 text-white">
@@ -619,7 +676,7 @@ function AppContent() {
   };
 
   const currentRoster = rosters[pickRound] || { western: { forwards: [], defense: [], goalies: [] }, eastern: { forwards: [], defense: [], goalies: [] } };
-  const uniqueTeams = useMemo(() => [...new Set(players.map(p => p.team))].sort(), [players]);
+  const uniqueTeams = useMemo(() => [...new Set(players.map(p => p.team_abbrev))].filter(Boolean).sort(), [players]);
 
   const salary = useMemo(() => {
     if (!currentRoster || !players.length) return 0;
@@ -852,7 +909,7 @@ function AppContent() {
   const filterPlayers = (playerList) => {
     return playerList.filter(p => {
       const matchesSearch = !searchTerm || p.name.toLowerCase().includes(searchTerm.toLowerCase());
-      const matchesTeam = !teamFilter || p.team === teamFilter;
+      const matchesTeam = !teamFilter || p.team_abbrev === teamFilter;
       return matchesSearch && matchesTeam;
     });
   };
