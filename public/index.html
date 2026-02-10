@@ -319,10 +319,12 @@ const PlayerCard = ({ player, isSelected, isStar, canSelect, onToggle, onToggleS
   );
 };
 
-const SearchInput = ({ value, onChange, placeholder }) => {
+// Memoized search input that prevents re-creation and focus loss
+const SearchInput = React.memo(({ value, onChange, placeholder, className }) => {
   const [localValue, setLocalValue] = React.useState(value);
-  const debounceTimer = React.useRef(null);
+  const timeoutRef = React.useRef(null);
   
+  // Sync with parent value changes
   React.useEffect(() => {
     setLocalValue(value);
   }, [value]);
@@ -331,11 +333,15 @@ const SearchInput = ({ value, onChange, placeholder }) => {
     const newValue = e.target.value;
     setLocalValue(newValue);
     
-    // Debounce the parent update to avoid too many re-renders
-    if (debounceTimer.current) clearTimeout(debounceTimer.current);
-    debounceTimer.current = setTimeout(() => {
+    // Clear existing timeout
+    if (timeoutRef.current) {
+      clearTimeout(timeoutRef.current);
+    }
+    
+    // Update parent after user stops typing (300ms)
+    timeoutRef.current = setTimeout(() => {
       onChange(newValue);
-    }, 150);
+    }, 300);
   };
   
   return (
@@ -344,13 +350,13 @@ const SearchInput = ({ value, onChange, placeholder }) => {
       placeholder={placeholder}
       value={localValue} 
       onChange={handleChange}
-      className="w-full bg-slate-700 border border-slate-600 rounded-lg px-4 py-2 pl-10 text-white placeholder-gray-400" 
+      className={className}
     />
   );
-};
+});
 
 // Reusable text input component that prevents focus loss
-const TextInput = ({ value, onChange, ...props }) => {
+const TextInput = React.memo(({ value, onChange, ...props }) => {
   const [localValue, setLocalValue] = React.useState(value);
   
   React.useEffect(() => {
@@ -375,12 +381,17 @@ const TextInput = ({ value, onChange, ...props }) => {
       onBlur={handleBlur}
     />
   );
-};
+});
 
 const PlayerFilter = ({ searchTerm, setSearchTerm, teamFilter, setTeamFilter, teams }) => (
   <div className="flex flex-col sm:flex-row gap-3 mb-6">
     <div className="flex-1 relative">
-      <SearchInput value={searchTerm} onChange={setSearchTerm} placeholder="Search players..." />
+      <SearchInput 
+        value={searchTerm} 
+        onChange={setSearchTerm} 
+        placeholder="Search players..." 
+        className="w-full bg-slate-700 border border-slate-600 rounded-lg px-4 py-2 pl-10 text-white placeholder-gray-400"
+      />
       <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400">🔍</span>
     </div>
     <select value={teamFilter} onChange={(e) => setTeamFilter(e.target.value)} className="bg-slate-700 border border-slate-600 rounded-lg px-4 py-2 text-white">
@@ -907,11 +918,23 @@ function AppContent() {
   };
 
   const filterPlayers = (playerList) => {
-    return playerList.filter(p => {
+    const filtered = playerList.filter(p => {
       const matchesSearch = !searchTerm || p.name.toLowerCase().includes(searchTerm.toLowerCase());
       const matchesTeam = !teamFilter || p.team_abbrev === teamFilter;
       return matchesSearch && matchesTeam;
     });
+    
+    // Debug logging
+    if (teamFilter && filtered.length === 0 && playerList.length > 0) {
+      console.log('Team filter debug:', { 
+        teamFilter, 
+        samplePlayer: playerList[0],
+        totalPlayers: playerList.length,
+        filteredCount: filtered.length 
+      });
+    }
+    
+    return filtered;
   };
 
   if (authLoading || dataLoading) {
@@ -931,6 +954,25 @@ function AppContent() {
     const pos = p.position === 'forward' ? 'forwards' : p.position === 'defense' ? 'defense' : 'goalies';
     if (playersByConf[p.conference]?.[pos]) playersByConf[p.conference][pos].push(p);
   });
+  
+  // Debug: log sample player to see structure
+  if (players.length > 0 && !window.playerStructureLogged) {
+    console.log('Sample player structure:', players[0]);
+    console.log('Total players:', players.length);
+    console.log('Players by conference:', {
+      western: {
+        forwards: playersByConf.western.forwards.length,
+        defense: playersByConf.western.defense.length,
+        goalies: playersByConf.western.goalies.length
+      },
+      eastern: {
+        forwards: playersByConf.eastern.forwards.length,
+        defense: playersByConf.eastern.defense.length,
+        goalies: playersByConf.eastern.goalies.length
+      }
+    });
+    window.playerStructureLogged = true;
+  }
 
   const Nav = () => (
     <nav className="bg-slate-900 border-b-4 border-red-600 sticky top-0 z-40">
