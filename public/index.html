@@ -252,20 +252,21 @@ const UpdateBanner = ({ lastUpdate, round, verified, onRefresh, isRefreshing, is
 
 const PlayerImage = ({ player, size = 'md' }) => {
   const [imgError, setImgError] = useState(false);
-  const [imgSrc, setImgSrc] = useState(getPlayerHeadshot(player.nhlId));
+  const playerId = player.nhl_id || player.nhlId;
+  const [imgSrc, setImgSrc] = useState(getPlayerHeadshot(playerId));
   const sizeClasses = { sm: 'w-10 h-10 text-xs', md: 'w-12 h-12 text-sm', lg: 'w-16 h-16 text-base' };
   
   const handleError = () => {
     if (imgSrc.includes('assets.nhle.com')) {
-      setImgSrc(`https://cms.nhl.bamgrid.com/images/headshots/current/168x168/${player.nhlId}.jpg`);
+      setImgSrc(`https://cms.nhl.bamgrid.com/images/headshots/current/168x168/${playerId}.jpg`);
     } else if (imgSrc.includes('cms.nhl.bamgrid.com')) {
-      setImgSrc(`https://nhl.bamcontent.com/images/headshots/current/168x168/${player.nhlId}@2x.jpg`);
+      setImgSrc(`https://nhl.bamcontent.com/images/headshots/current/168x168/${playerId}@2x.jpg`);
     } else {
       setImgError(true);
     }
   };
   
-  if (imgError || !player.nhlId) {
+  if (imgError || !playerId) {
     return (
       <div className={`${sizeClasses[size]} rounded-full flex items-center justify-center text-white font-bold`} style={{ backgroundColor: player.teamColor || '#334155' }}>
         {player.name.split(' ').map(n => n[0]).join('')}
@@ -1421,12 +1422,46 @@ function AppContent() {
                   <option value={3}>Conference Finals & Cup</option>
                 </select>
               </div>
-              <button 
-                onClick={handleRefreshStats} 
-                disabled={isRefreshing} 
-                className={`w-full py-2 rounded-lg font-bold ${isRefreshing ? 'bg-slate-700 text-gray-500' : 'bg-blue-600 text-white'}`}>
-                {isRefreshing ? 'Refreshing...' : '🔄 Refresh NHL Stats'}
-              </button>
+              
+              <div className="bg-slate-700/50 rounded-lg p-4 space-y-3">
+                <div className="text-white font-semibold mb-2">🏒 Player Management</div>
+                <button 
+                  onClick={async () => {
+                    if (!confirm('Populate ALL NHL players from current rosters? This will add ~700 players.')) return;
+                    setIsRefreshing(true);
+                    try {
+                      const res = await fetch(`${api.baseUrl}/admin/populate-players`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${api.token}` }
+                      });
+                      const data = await res.json();
+                      if (data.success) {
+                        alert(`✅ ${data.message}`);
+                      } else {
+                        alert(`❌ Error: ${data.error}`);
+                      }
+                    } catch (err) {
+                      alert('❌ Failed to populate players');
+                    }
+                    setIsRefreshing(false);
+                  }}
+                  disabled={isRefreshing} 
+                  className={`w-full py-2 rounded-lg font-bold ${isRefreshing ? 'bg-slate-700 text-gray-500' : 'bg-purple-600 hover:bg-purple-500 text-white'}`}>
+                  {isRefreshing ? 'Processing...' : '⬇️ Populate All Players'}
+                </button>
+                <p className="text-gray-400 text-xs">Fetches current rosters from all 32 NHL teams. Run this once initially, then it auto-updates with stats refresh.</p>
+              </div>
+
+              <div className="bg-slate-700/50 rounded-lg p-4 space-y-3">
+                <div className="text-white font-semibold mb-2">📊 Stats Management</div>
+                <button 
+                  onClick={handleRefreshStats} 
+                  disabled={isRefreshing} 
+                  className={`w-full py-2 rounded-lg font-bold ${isRefreshing ? 'bg-slate-700 text-gray-500' : 'bg-blue-600 hover:bg-blue-500 text-white'}`}>
+                  {isRefreshing ? 'Refreshing...' : '🔄 Refresh NHL Stats'}
+                </button>
+                <p className="text-gray-400 text-xs">Updates playoff stats for all players. Also checks for new call-ups automatically.</p>
+              </div>
             </div>
           )}
 
