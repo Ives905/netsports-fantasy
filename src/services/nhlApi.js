@@ -18,34 +18,19 @@ class NHLApiService {
     let totalPlayers = 0;
     let newPlayers = 0;
     
+    // Hardcoded list of all 32 NHL teams (more reliable than API)
+    const allTeams = [
+      'ANA', 'BOS', 'BUF', 'CGY', 'CAR', 'CHI', 'COL', 'CBJ',
+      'DAL', 'DET', 'EDM', 'FLA', 'LAK', 'MIN', 'MTL', 'NSH',
+      'NJD', 'NYI', 'NYR', 'OTT', 'PHI', 'PIT', 'SEA', 'SJS',
+      'STL', 'TBL', 'TOR', 'VAN', 'VGK', 'WSH', 'WPG', 'ARI'
+    ];
+    
     try {
-      console.log('Fetching NHL standings...');
-      // Get all teams
-      const standingsResponse = await axios.get(`${NHL_API_BASE}/standings/now`);
-      console.log('Standings response received');
-      
-      if (!standingsResponse.data || !standingsResponse.data.standings) {
-        console.error('Invalid standings response:', standingsResponse.data);
-        return { success: false, error: 'Invalid standings data from NHL API' };
-      }
-      
-      const allTeams = standingsResponse.data.standings.flatMap(conf => conf.teams || []);
-      console.log(`Found ${allTeams.length} teams`);
+      console.log(`Fetching rosters for ${allTeams.length} NHL teams...`);
 
-      if (allTeams.length === 0) {
-        console.error('No teams found in standings');
-        return { success: false, error: 'No teams found in NHL standings' };
-      }
-
-      for (const team of allTeams) {
+      for (const teamAbbrev of allTeams) {
         try {
-          const teamAbbrev = team.teamAbbrev?.default || team.teamAbbrev;
-          
-          if (!teamAbbrev) {
-            console.error('Team has no abbreviation:', team);
-            continue;
-          }
-          
           console.log(`Fetching roster for ${teamAbbrev}...`);
           
           // Fetch full team roster
@@ -115,7 +100,7 @@ class NHLApiService {
           await this.sleep(200);
           
         } catch (teamError) {
-          console.error(`Error fetching roster for team:`, teamError.message);
+          console.error(`Error fetching roster for ${teamAbbrev}:`, teamError.message);
         }
       }
 
