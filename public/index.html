@@ -1430,18 +1430,14 @@ function AppContent() {
                     if (!confirm('Populate ALL NHL players from current rosters? This will add ~700 players.')) return;
                     setIsRefreshing(true);
                     try {
-                      const res = await fetch(`${api.baseUrl}/admin/populate-players`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${api.token}` }
-                      });
-                      const data = await res.json();
+                      const data = await api.request('/admin/populate-players', { method: 'POST' });
                       if (data.success) {
                         alert(`✅ ${data.message}`);
                       } else {
                         alert(`❌ Error: ${data.error}`);
                       }
                     } catch (err) {
-                      alert('❌ Failed to populate players');
+                      alert(`❌ Failed to populate players: ${err.message}`);
                     }
                     setIsRefreshing(false);
                   }}
