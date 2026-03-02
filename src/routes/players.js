@@ -12,15 +12,16 @@ router.get('/', async (req, res) => {
   try {
     console.log('Fetching players...');
     
-    // Get players - simplified query without team full_name
+    // Get players — includes headshot_url (exact URL from NHL API roster response)
     const result = await pool.query(`
-      SELECT 
+      SELECT
         p.id,
         p.nhl_id,
         p.name,
         p.position,
         p.team_abbrev,
         p.cost,
+        p.headshot_url,
         t.conference
       FROM players p
       LEFT JOIN teams t ON p.team_abbrev = t.abbrev

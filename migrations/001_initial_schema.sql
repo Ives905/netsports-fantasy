@@ -41,6 +41,7 @@ CREATE TABLE players (
   team_abbrev VARCHAR(3) REFERENCES teams(abbrev),
   position VARCHAR(10) NOT NULL CHECK (position IN ('forward', 'defense', 'goalie')),
   cost INT NOT NULL CHECK (cost >= 1 AND cost <= 5),
+  headshot_url VARCHAR(500),
   is_active BOOLEAN DEFAULT TRUE,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()

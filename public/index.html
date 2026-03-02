@@ -251,10 +251,12 @@ const UpdateBanner = ({ lastUpdate, round, verified, onRefresh, isRefreshing, is
 };
 
 const PlayerImage = ({ player, size = 'md' }) => {
-  // fallbackLevel: 0 = headshot, 1 = team logo, 2 = initials
+  // fallbackLevel: 0 = headshot_url from DB, 1 = team logo, 2 = initials
   const [fallbackLevel, setFallbackLevel] = useState(0);
   const playerId = player.nhl_id || player.nhlId;
   const teamAbbrev = player.team_abbrev || player.teamAbbrev;
+  // headshot_url is the exact URL stored from the NHL API — always the correct season
+  const headshotUrl = player.headshot_url || (playerId ? `https://assets.nhle.com/mugs/nhl/20252026/${playerId}.png` : null);
   const sizeClasses = { sm: 'w-10 h-10 text-xs', md: 'w-12 h-12 text-sm', lg: 'w-16 h-16 text-base' };
 
   const handleError = () => setFallbackLevel(prev => prev + 1);
@@ -265,7 +267,7 @@ const PlayerImage = ({ player, size = 'md' }) => {
     </div>
   );
 
-  if (!playerId || fallbackLevel >= 2) return <Initials />;
+  if (!headshotUrl || fallbackLevel >= 2) return <Initials />;
 
   if (fallbackLevel === 1) {
     if (!teamAbbrev) return <Initials />;
@@ -283,7 +285,7 @@ const PlayerImage = ({ player, size = 'md' }) => {
 
   return (
     <img
-      src={`https://assets.nhle.com/mugs/nhl/20252026/${playerId}.png`}
+      src={headshotUrl}
       alt={player.name}
       className={`${sizeClasses[size]} rounded-full object-cover bg-slate-700`}
       onError={handleError}

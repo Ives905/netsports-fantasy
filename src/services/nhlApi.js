@@ -78,13 +78,17 @@ class NHLApiService {
               // Calculate cost based on position and player type
               const cost = this.calculatePlayerCost(player, position);
 
+              // player.headshot from NHL API is the exact verified headshot URL
+              const headshotUrl = player.headshot || null;
+
               const result = await pool.query(`
-                INSERT INTO players (nhl_id, name, position, team_abbrev, cost, is_active)
-                VALUES ($1, $2, $3, $4, $5, true)
+                INSERT INTO players (nhl_id, name, position, team_abbrev, cost, is_active, headshot_url)
+                VALUES ($1, $2, $3, $4, $5, true, $6)
                 ON CONFLICT (nhl_id) DO UPDATE
-                SET name = $2, position = $3, team_abbrev = $4, cost = $5, is_active = true
+                SET name = $2, position = $3, team_abbrev = $4, cost = $5, is_active = true,
+                    headshot_url = COALESCE($6, players.headshot_url)
                 RETURNING (xmax = 0) AS inserted
-              `, [player.id, fullName, position, teamAbbrev, cost]);
+              `, [player.id, fullName, position, teamAbbrev, cost, headshotUrl]);
               
               totalPlayers++;
               if (result.rows[0].inserted) {

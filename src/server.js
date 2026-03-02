@@ -4,6 +4,19 @@ const express = require('express');
 const cors = require('cors');
 const path = require('path');
 const rateLimit = require('express-rate-limit');
+const pool = require('../config/database');
+
+// Safe schema updates — idempotent, run on every startup
+async function runSchemaMigrations() {
+  try {
+    await pool.query(`
+      ALTER TABLE players ADD COLUMN IF NOT EXISTS headshot_url VARCHAR(500)
+    `);
+    console.log('✓ Schema up to date');
+  } catch (err) {
+    console.error('Schema migration warning:', err.message);
+  }
+}
 
 const authRoutes = require('./routes/auth');
 const playersRoutes = require('./routes/players');
@@ -72,7 +85,8 @@ app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, '../public/index.html'));
 });
 
-// Start server
+// Start server (run schema migrations first)
+runSchemaMigrations().then(() => {
 app.listen(PORT, () => {
   console.log(`
 ╔═══════════════════════════════════════════════════════════╗
@@ -93,5 +107,6 @@ app.listen(PORT, () => {
     console.log('  Run "npm run fetch-stats" manually to update stats');
   }
 });
+}); // end runSchemaMigrations
 
 module.exports = app;
