@@ -1575,6 +1575,28 @@ function AppContent() {
                   {isRefreshing ? 'Processing...' : '🖼️ Refresh Player Headshots'}
                 </button>
                 <p className="text-gray-400 text-xs">Updates headshot URLs from NHL API. Auto-runs on startup. Only touches missing ones unless you choose full refresh.</p>
+                <button
+                  onClick={async () => {
+                    if (!confirm('Recalculate all player values using current regular-season stats?\n\nForwards/defense → points-per-game\nGoalies → save percentage\n\nThis will update costs for every player in the database.')) return;
+                    setIsRefreshing(true);
+                    try {
+                      const data = await api.request('/admin/update-player-costs', { method: 'POST' });
+                      if (data.success) {
+                        const dist = data.costDistribution || {};
+                        alert(`✅ ${data.message}\n\nCost breakdown:\n$1: ${dist[1]||0} players\n$2: ${dist[2]||0} players\n$3: ${dist[3]||0} players\n$4: ${dist[4]||0} players\n$5: ${dist[5]||0} players`);
+                      } else {
+                        alert(`❌ Error: ${data.error}`);
+                      }
+                    } catch (err) {
+                      alert(`❌ Failed to recalculate costs: ${err.message}`);
+                    }
+                    setIsRefreshing(false);
+                  }}
+                  disabled={isRefreshing}
+                  className={`w-full py-2 rounded-lg font-bold ${isRefreshing ? 'bg-slate-700 text-gray-500' : 'bg-green-600 hover:bg-green-500 text-white'}`}>
+                  {isRefreshing ? 'Processing...' : '💰 Recalculate Player Values'}
+                </button>
+                <p className="text-gray-400 text-xs">Sets player costs ($1–$5) based on current regular-season stats. Forwards/defense: points-per-game. Goalies: save percentage. Run after populating players.</p>
               </div>
 
               <div className="bg-slate-700/50 rounded-lg p-4 space-y-3">

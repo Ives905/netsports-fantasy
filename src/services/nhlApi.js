@@ -86,7 +86,7 @@ class NHLApiService {
                 INSERT INTO players (nhl_id, name, position, team_abbrev, cost, is_active, headshot_url)
                 VALUES ($1, $2, $3, $4, $5, true, $6)
                 ON CONFLICT (nhl_id) DO UPDATE
-                SET name = $2, position = $3, team_abbrev = $4, cost = $5, is_active = true,
+                SET name = $2, position = $3, team_abbrev = $4, is_active = true,
                     headshot_url = COALESCE($6, players.headshot_url)
                 RETURNING (xmax = 0) AS inserted
               `, [player.id, fullName, position, teamAbbrev, cost, headshotUrl]);
@@ -124,23 +124,154 @@ class NHLApiService {
   }
 
   /**
-   * Calculate player cost based on various factors
+   * Default cost for new players being inserted (before stats are available).
+   * Run updatePlayerCosts() to set real values based on NHL stats.
    */
   calculatePlayerCost(player, position) {
-    // Default costs by position
-    const baseCost = {
-      'goalie': 3,
-      'defense': 2,
-      'forward': 2
-    };
-    
-    let cost = baseCost[position] || 2;
-    
-    // Add cost for higher draft picks or skilled players
-    if (player.headshot) cost += 1; // Has headshot = likely regular player
-    
-    // Cap between 0 and 5
-    return Math.min(Math.max(cost, 0), 5);
+    const baseCost = { goalie: 3, defense: 2, forward: 2 };
+    return baseCost[position] || 2;
+  }
+
+  /**
+   * Fetch regular-season stats from the NHL Stats API and update every
+   * active player's cost in the database based on their actual performance.
+   *
+   * Skaters  → cost driven by points-per-game (position-specific thresholds)
+   * Goalies  → cost driven by save percentage + games played
+   *
+   * Call this from the admin panel after rosters are populated.
+   */
+  async updatePlayerCosts() {
+    try {
+      console.log(`Fetching ${this.season} regular-season stats to calculate player values...`);
+
+      // Pull bulk skater + goalie stats in parallel (gameTypeId=2 = regular season)
+      const [skaterRes, goalieRes] = await Promise.all([
+        axios.get(`${NHL_STATS_BASE}/skater/summary`, {
+          params: { limit: -1, cayenneExp: `seasonId=${this.season} and gameTypeId=2` },
+          timeout: 15000
+        }),
+        axios.get(`${NHL_STATS_BASE}/goalie/summary`, {
+          params: { limit: -1, cayenneExp: `seasonId=${this.season} and gameTypeId=2` },
+          timeout: 15000
+        })
+      ]);
+
+      // Build playerId → stats lookup maps
+      const skaterStats = {};
+      for (const s of (skaterRes.data?.data || [])) {
+        skaterStats[s.playerId] = s;
+      }
+      const goalieStats = {};
+      for (const g of (goalieRes.data?.data || [])) {
+        goalieStats[g.playerId] = g;
+      }
+
+      const leagueTotal = Object.keys(skaterStats).length + Object.keys(goalieStats).length;
+      console.log(`Loaded stats for ${leagueTotal} players from NHL Stats API`);
+
+      // Get all active players from DB
+      const playersResult = await pool.query(`
+        SELECT id, nhl_id, position, name FROM players WHERE is_active = true
+      `);
+
+      let updated = 0;
+      let noStats = 0;
+      const costDistribution = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
+
+      for (const player of playersResult.rows) {
+        let newCost;
+        const nhlId = parseInt(player.nhl_id);
+
+        if (player.position === 'goalie') {
+          const stats = goalieStats[nhlId];
+          newCost = this.calculateGoalieCost(stats);
+          if (!stats) noStats++;
+        } else {
+          const stats = skaterStats[nhlId];
+          newCost = this.calculateSkaterCost(stats, player.position);
+          if (!stats) noStats++;
+        }
+
+        await pool.query(
+          'UPDATE players SET cost = $1, updated_at = NOW() WHERE id = $2',
+          [newCost, player.id]
+        );
+        updated++;
+        costDistribution[newCost] = (costDistribution[newCost] || 0) + 1;
+      }
+
+      console.log(`✅ Player costs updated for ${updated} players`);
+      console.log(`   Cost breakdown: $1×${costDistribution[1]}  $2×${costDistribution[2]}  $3×${costDistribution[3]}  $4×${costDistribution[4]}  $5×${costDistribution[5]}`);
+      if (noStats > 0) console.log(`   ${noStats} players had no current-season stats (set to default cost)`);
+
+      return { success: true, updated, noStats, costDistribution };
+    } catch (error) {
+      console.error('Error updating player costs:', error.message);
+      return { success: false, error: error.message };
+    }
+  }
+
+  /**
+   * Calculate skater cost from regular-season stats.
+   * Uses points-per-game with position-specific thresholds
+   * (defensemen score fewer points than forwards at the same talent level).
+   */
+  calculateSkaterCost(stats, position) {
+    if (!stats || !stats.gamesPlayed || stats.gamesPlayed < 5) {
+      return 2; // Not enough data — default mid-range
+    }
+
+    const ppg = stats.points / stats.gamesPlayed;
+
+    if (position === 'defense') {
+      // Defensive scoring is compressed — separate thresholds
+      // Elite: Makar/Fox tier (~0.80+ PPG)
+      if (ppg >= 0.75) return 5;
+      // Top pairing offensive D (~0.55+)
+      if (ppg >= 0.55) return 4;
+      // Solid two-way D (~0.35+)
+      if (ppg >= 0.35) return 3;
+      // Bottom pairing
+      if (ppg >= 0.15) return 2;
+      return 1;
+    } else {
+      // Forwards
+      // Elite: McDavid/Draisaitl/MacKinnon tier (~0.95+ PPG)
+      if (ppg >= 0.95) return 5;
+      // Star top-6: Matthews/Barkov/Pastrnak tier (~0.70+)
+      if (ppg >= 0.70) return 4;
+      // Solid mid-tier forward (~0.45+)
+      if (ppg >= 0.45) return 3;
+      // Bottom-6 / fringe
+      if (ppg >= 0.20) return 2;
+      return 1;
+    }
+  }
+
+  /**
+   * Calculate goalie cost from regular-season stats.
+   * Save percentage is the most reliable measure of goalie quality.
+   * Games played threshold ensures we're evaluating real starters.
+   */
+  calculateGoalieCost(stats) {
+    if (!stats || !stats.gamesPlayed || stats.gamesPlayed < 5) {
+      return 2; // Unknown / rarely-used backup
+    }
+
+    // savePct field name varies slightly across NHL API versions
+    const savePct = stats.savePct || stats.savePctg || 0;
+    const gp = stats.gamesPlayed;
+
+    // Elite starter: .920+ SV%, full workload
+    if (savePct >= 0.920 && gp >= 20) return 5;
+    // Strong starter: .910+ SV%
+    if (savePct >= 0.910 && gp >= 15) return 4;
+    // Solid starter: .900+ SV%
+    if (savePct >= 0.900 && gp >= 10) return 3;
+    // Backup / below average but has NHL experience
+    if (gp >= 10) return 2;
+    return 1;
   }
 
   /**

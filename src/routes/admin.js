@@ -290,6 +290,30 @@ router.post('/refresh-stats', authenticateToken, verifyAdmin, async (req, res) =
   }
 });
 
+// POST /api/admin/update-player-costs - Recalculate all player costs from NHL regular-season stats
+router.post('/update-player-costs', authenticateToken, verifyAdmin, async (req, res) => {
+  try {
+    console.log('Admin triggered player cost recalculation...');
+    const nhlApi = require('../services/nhlApi');
+    const result = await nhlApi.updatePlayerCosts();
+
+    if (result.success) {
+      res.json({
+        success: true,
+        updated: result.updated,
+        noStats: result.noStats,
+        costDistribution: result.costDistribution,
+        message: `Updated costs for ${result.updated} players. ${result.noStats} had no current-season stats (kept at default).`
+      });
+    } else {
+      res.status(500).json({ success: false, error: result.error });
+    }
+  } catch (error) {
+    console.error('Error in update-player-costs endpoint:', error);
+    res.status(500).json({ error: 'Failed to update player costs', details: error.message });
+  }
+});
+
 // POST /api/admin/refresh-headshots - Backfill/refresh all missing headshot URLs
 router.post('/refresh-headshots', authenticateToken, verifyAdmin, async (req, res) => {
   try {
