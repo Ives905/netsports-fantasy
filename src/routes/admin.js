@@ -290,4 +290,71 @@ router.post('/refresh-stats', authenticateToken, verifyAdmin, async (req, res) =
   }
 });
 
+// POST /api/admin/refresh-headshots - Backfill/refresh all missing headshot URLs
+router.post('/refresh-headshots', authenticateToken, verifyAdmin, async (req, res) => {
+  try {
+    console.log('Admin triggered headshot refresh...');
+    const axios = require('axios');
+
+    const missing = await pool.query(`
+      SELECT DISTINCT team_abbrev FROM players
+      WHERE headshot_url IS NULL AND team_abbrev IS NOT NULL
+    `);
+
+    // Also allow force-refresh of all headshots if ?force=true
+    const forceAll = req.query.force === 'true';
+    const teamQuery = forceAll
+      ? `SELECT DISTINCT team_abbrev FROM players WHERE team_abbrev IS NOT NULL`
+      : `SELECT DISTINCT team_abbrev FROM players WHERE headshot_url IS NULL AND team_abbrev IS NOT NULL`;
+
+    const teamsResult = await pool.query(teamQuery);
+    const teams = teamsResult.rows.map(r => r.team_abbrev);
+
+    if (teams.length === 0) {
+      return res.json({ success: true, updated: 0, message: 'All headshots already populated' });
+    }
+
+    let updated = 0;
+    const errors = [];
+
+    for (const team_abbrev of teams) {
+      try {
+        const url = `https://api-web.nhle.com/v1/roster/${team_abbrev}/current`;
+        const { data } = await axios.get(url, { timeout: 8000 });
+        const players = [
+          ...(data.forwards || []),
+          ...(data.defensemen || []),
+          ...(data.goalies || [])
+        ];
+
+        for (const p of players) {
+          if (!p.headshot || !p.id) continue;
+          const whereClause = forceAll
+            ? 'WHERE nhl_id = $2'
+            : 'WHERE nhl_id = $2 AND headshot_url IS NULL';
+          const result = await pool.query(
+            `UPDATE players SET headshot_url = $1 ${whereClause} RETURNING id`,
+            [p.headshot, p.id]
+          );
+          updated += result.rowCount;
+        }
+        await new Promise(r => setTimeout(r, 100));
+      } catch (err) {
+        errors.push(`${team_abbrev}: ${err.message}`);
+      }
+    }
+
+    res.json({
+      success: true,
+      updated,
+      teamsProcessed: teams.length,
+      errors: errors.length > 0 ? errors : undefined,
+      message: `Updated headshot URLs for ${updated} players across ${teams.length} teams`
+    });
+  } catch (error) {
+    console.error('Error in refresh-headshots endpoint:', error);
+    res.status(500).json({ error: 'Failed to refresh headshots', details: error.message });
+  }
+});
+
 module.exports = router;

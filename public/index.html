@@ -46,8 +46,6 @@ const TIEBREAKER_QUESTIONS = {
   ]
 };
 
-const getPlayerHeadshot = (nhlId) => `https://assets.nhle.com/mugs/nhl/20252026/${nhlId}.png`;
-
 const api = {
   token: localStorage.getItem('netsports-token'),
   setToken(token) {
@@ -251,15 +249,13 @@ const UpdateBanner = ({ lastUpdate, round, verified, onRefresh, isRefreshing, is
 };
 
 const PlayerImage = ({ player, size = 'md' }) => {
-  // fallbackLevel: 0 = headshot_url from DB, 1 = team logo, 2 = initials
-  const [fallbackLevel, setFallbackLevel] = useState(0);
-  const playerId = player.nhl_id || player.nhlId;
   const teamAbbrev = player.team_abbrev || player.teamAbbrev;
-  // headshot_url is the exact URL stored from the NHL API — always the correct season
-  const headshotUrl = player.headshot_url || (playerId ? `https://assets.nhle.com/mugs/nhl/20252026/${playerId}.png` : null);
+  const headshotUrl = player.headshot_url || null;
   const sizeClasses = { sm: 'w-10 h-10 text-xs', md: 'w-12 h-12 text-sm', lg: 'w-16 h-16 text-base' };
 
-  const handleError = () => setFallbackLevel(prev => prev + 1);
+  // stage: 'headshot' -> 'logo' -> 'initials'
+  const startStage = headshotUrl ? 'headshot' : (teamAbbrev ? 'logo' : 'initials');
+  const [stage, setStage] = useState(startStage);
 
   const Initials = () => (
     <div className={`${sizeClasses[size]} rounded-full flex items-center justify-center text-white font-bold bg-slate-700`}>
@@ -267,9 +263,9 @@ const PlayerImage = ({ player, size = 'md' }) => {
     </div>
   );
 
-  if (!headshotUrl || fallbackLevel >= 2) return <Initials />;
+  if (stage === 'initials') return <Initials />;
 
-  if (fallbackLevel === 1) {
+  if (stage === 'logo') {
     if (!teamAbbrev) return <Initials />;
     return (
       <div className={`${sizeClasses[size]} rounded-full flex items-center justify-center bg-slate-800 overflow-hidden`}>
@@ -277,18 +273,19 @@ const PlayerImage = ({ player, size = 'md' }) => {
           src={`https://assets.nhle.com/logos/nhl/svg/${teamAbbrev}_light.svg`}
           alt={teamAbbrev}
           className="w-full h-full object-contain p-1"
-          onError={handleError}
+          onError={() => setStage('initials')}
         />
       </div>
     );
   }
 
+  // stage === 'headshot'
   return (
     <img
       src={headshotUrl}
       alt={player.name}
       className={`${sizeClasses[size]} rounded-full object-cover bg-slate-700`}
-      onError={handleError}
+      onError={() => setStage(teamAbbrev ? 'logo' : 'initials')}
     />
   );
 };
@@ -1560,6 +1557,24 @@ function AppContent() {
                   {isRefreshing ? 'Processing...' : '⬇️ Populate All Players'}
                 </button>
                 <p className="text-gray-400 text-xs">Fetches current rosters from all 32 NHL teams. Run this once initially, then it auto-updates with stats refresh.</p>
+                <button
+                  onClick={async () => {
+                    const force = confirm('Force-refresh ALL headshots (including ones already set)?\n\nClick OK for full refresh, Cancel for missing-only.');
+                    setIsRefreshing(true);
+                    try {
+                      const endpoint = `/admin/refresh-headshots${force ? '?force=true' : ''}`;
+                      const data = await api.request(endpoint, { method: 'POST' });
+                      alert(`✅ ${data.message}`);
+                    } catch (err) {
+                      alert(`❌ Failed to refresh headshots: ${err.message}`);
+                    }
+                    setIsRefreshing(false);
+                  }}
+                  disabled={isRefreshing}
+                  className={`w-full py-2 rounded-lg font-bold ${isRefreshing ? 'bg-slate-700 text-gray-500' : 'bg-indigo-600 hover:bg-indigo-500 text-white'}`}>
+                  {isRefreshing ? 'Processing...' : '🖼️ Refresh Player Headshots'}
+                </button>
+                <p className="text-gray-400 text-xs">Updates headshot URLs from NHL API. Auto-runs on startup. Only touches missing ones unless you choose full refresh.</p>
               </div>
 
               <div className="bg-slate-700/50 rounded-lg p-4 space-y-3">
