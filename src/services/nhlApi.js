@@ -213,7 +213,7 @@ class NHLApiService {
   }
 
   /**
-   * Calculate skater cost from regular-season stats.
+   * Calculate skater cost from regular-season stats on a $1–$4 scale.
    * Uses points-per-game with position-specific thresholds
    * (defensemen score fewer points than forwards at the same talent level).
    */
@@ -226,31 +226,21 @@ class NHLApiService {
 
     if (position === 'defense') {
       // Defensive scoring is compressed — separate thresholds
-      // Elite: Makar/Fox tier (~0.80+ PPG)
-      if (ppg >= 0.75) return 5;
-      // Top pairing offensive D (~0.55+)
-      if (ppg >= 0.55) return 4;
-      // Solid two-way D (~0.35+)
-      if (ppg >= 0.35) return 3;
-      // Bottom pairing
-      if (ppg >= 0.15) return 2;
+      if (ppg >= 0.75) return 4; // Elite: Makar/Fox tier
+      if (ppg >= 0.45) return 3; // Solid offensive D
+      if (ppg >= 0.15) return 2; // Average / stay-at-home
       return 1;
     } else {
       // Forwards
-      // Elite: McDavid/Draisaitl/MacKinnon tier (~0.95+ PPG)
-      if (ppg >= 0.95) return 5;
-      // Star top-6: Matthews/Barkov/Pastrnak tier (~0.70+)
-      if (ppg >= 0.70) return 4;
-      // Solid mid-tier forward (~0.45+)
-      if (ppg >= 0.45) return 3;
-      // Bottom-6 / fringe
-      if (ppg >= 0.20) return 2;
+      if (ppg >= 0.95) return 4; // Elite: McDavid/Draisaitl/MacKinnon tier
+      if (ppg >= 0.60) return 3; // Strong top-6: Matthews/Barkov/Pastrnak tier
+      if (ppg >= 0.25) return 2; // Mid-tier and bottom-6
       return 1;
     }
   }
 
   /**
-   * Calculate goalie cost from regular-season stats.
+   * Calculate goalie cost from regular-season stats on a $1–$4 scale.
    * Save percentage is the most reliable measure of goalie quality.
    * Games played threshold ensures we're evaluating real starters.
    */
@@ -263,14 +253,9 @@ class NHLApiService {
     const savePct = stats.savePct || stats.savePctg || 0;
     const gp = stats.gamesPlayed;
 
-    // Elite starter: .920+ SV%, full workload
-    if (savePct >= 0.920 && gp >= 20) return 5;
-    // Strong starter: .910+ SV%
-    if (savePct >= 0.910 && gp >= 15) return 4;
-    // Solid starter: .900+ SV%
-    if (savePct >= 0.900 && gp >= 10) return 3;
-    // Backup / below average but has NHL experience
-    if (gp >= 10) return 2;
+    if (savePct >= 0.920 && gp >= 20) return 4; // Elite starter: Hellebuyck/Shesterkin tier
+    if (savePct >= 0.908 && gp >= 15) return 3; // Strong starter
+    if (gp >= 10) return 2;                      // Backup / average starter with NHL experience
     return 1;
   }
 
