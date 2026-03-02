@@ -28,53 +28,97 @@ async function runSchemaMigrations() {
 }
 
 /**
- * Backfill headshot_url for any players that are missing it.
- * Groups by team so we only fetch each team's roster once.
+ * For every team in the teams table, ensure players exist and headshots are set.
+ * - Teams with ZERO players: fetches roster from NHL API and inserts them
+ * - Teams with players missing headshot_url: updates headshot_url only
  * Runs async in the background — doesn't block server startup.
  */
 async function backfillHeadshotUrls() {
   try {
-    const missing = await pool.query(`
-      SELECT DISTINCT team_abbrev FROM players
-      WHERE headshot_url IS NULL AND team_abbrev IS NOT NULL
+    // Find teams that either have no players at all, or have players missing headshots
+    const teamsResult = await pool.query(`
+      SELECT t.abbrev,
+             COUNT(p.id) AS player_count,
+             COUNT(p.id) FILTER (WHERE p.headshot_url IS NULL) AS missing_headshots
+      FROM teams t
+      LEFT JOIN players p ON p.team_abbrev = t.abbrev
+      GROUP BY t.abbrev
+      HAVING COUNT(p.id) = 0
+          OR COUNT(p.id) FILTER (WHERE p.headshot_url IS NULL) > 0
     `);
-    if (missing.rows.length === 0) {
-      console.log('✓ All headshot URLs already populated');
+
+    if (teamsResult.rows.length === 0) {
+      console.log('✓ All players present and headshot URLs populated');
       return;
     }
 
-    console.log(`⏳ Backfilling headshots for ${missing.rows.length} teams...`);
-    let updated = 0;
+    const emptyTeams   = teamsResult.rows.filter(r => parseInt(r.player_count) === 0).map(r => r.abbrev);
+    const missingShots = teamsResult.rows.filter(r => parseInt(r.missing_headshots) > 0).map(r => r.abbrev);
 
-    for (const { team_abbrev } of missing.rows) {
+    if (emptyTeams.length) console.log(`⏳ Inserting players for new teams: ${emptyTeams.join(', ')}`);
+    if (missingShots.length) console.log(`⏳ Backfilling headshots for ${missingShots.length} teams...`);
+
+    let inserted = 0, updated = 0;
+
+    for (const { abbrev: team_abbrev, player_count } of teamsResult.rows) {
+      const isNewTeam = parseInt(player_count) === 0;
       try {
         const url = `https://api-web.nhle.com/v1/roster/${team_abbrev}/current`;
         const { data } = await axios.get(url, { timeout: 8000 });
-        const players = [
-          ...(data.forwards || []),
+        const allPlayers = [
+          ...(data.forwards   || []),
           ...(data.defensemen || []),
-          ...(data.goalies || [])
+          ...(data.goalies    || [])
         ];
 
-        for (const p of players) {
-          if (!p.headshot || !p.id) continue;
-          const result = await pool.query(`
-            UPDATE players SET headshot_url = $1
-            WHERE nhl_id = $2 AND headshot_url IS NULL
-            RETURNING id
-          `, [p.headshot, p.id]);
-          updated += result.rowCount;
+        for (const p of allPlayers) {
+          if (!p.id) continue;
+
+          if (isNewTeam) {
+            // Full insert for teams that have no players yet
+            const firstName = p.firstName?.default || p.firstName || '';
+            const lastName  = p.lastName?.default  || p.lastName  || '';
+            const fullName  = `${firstName} ${lastName}`.trim();
+            if (!fullName) continue;
+
+            let position = 'forward';
+            if (p.positionCode === 'G') position = 'goalie';
+            else if (p.positionCode === 'D') position = 'defense';
+
+            const baseCost = { goalie: 3, defense: 2, forward: 2 };
+            const cost = Math.min(Math.max((baseCost[position] || 2) + (p.headshot ? 1 : 0), 1), 5);
+
+            const r = await pool.query(`
+              INSERT INTO players (nhl_id, name, position, team_abbrev, cost, is_active, headshot_url)
+              VALUES ($1, $2, $3, $4, $5, true, $6)
+              ON CONFLICT (nhl_id) DO UPDATE
+                SET name = $2, position = $3, team_abbrev = $4, cost = $5,
+                    is_active = true, headshot_url = COALESCE($6, players.headshot_url)
+              RETURNING (xmax = 0) AS was_inserted
+            `, [p.id, fullName, position, team_abbrev, cost, p.headshot || null]);
+
+            if (r.rows[0]?.was_inserted) inserted++;
+          } else if (p.headshot) {
+            // Headshot-only update for existing players
+            const r = await pool.query(`
+              UPDATE players SET headshot_url = $1
+              WHERE nhl_id = $2 AND headshot_url IS NULL
+              RETURNING id
+            `, [p.headshot, p.id]);
+            updated += r.rowCount;
+          }
         }
-        // Small delay to avoid hammering NHL API
+
         await new Promise(r => setTimeout(r, 150));
       } catch (err) {
-        console.error(`  Headshot backfill failed for ${team_abbrev}:`, err.message);
+        console.error(`  Roster fetch failed for ${team_abbrev}:`, err.message);
       }
     }
 
-    console.log(`✅ Headshot backfill complete — updated ${updated} players`);
+    if (inserted) console.log(`✅ Inserted ${inserted} new players`);
+    if (updated)  console.log(`✅ Updated headshots for ${updated} players`);
   } catch (err) {
-    console.error('Headshot backfill error:', err.message);
+    console.error('Backfill error:', err.message);
   }
 }
 
