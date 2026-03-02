@@ -19,11 +19,12 @@ class NHLApiService {
     let newPlayers = 0;
     
     // Hardcoded list of all 32 NHL teams (more reliable than API)
+    // Note: ARI (Arizona Coyotes) relocated and became UTA (Utah Hockey Club) in 2024-25
     const allTeams = [
       'ANA', 'BOS', 'BUF', 'CGY', 'CAR', 'CHI', 'COL', 'CBJ',
       'DAL', 'DET', 'EDM', 'FLA', 'LAK', 'MIN', 'MTL', 'NSH',
       'NJD', 'NYI', 'NYR', 'OTT', 'PHI', 'PIT', 'SEA', 'SJS',
-      'STL', 'TBL', 'TOR', 'VAN', 'VGK', 'WSH', 'WPG', 'ARI'
+      'STL', 'TBL', 'TOR', 'UTA', 'VAN', 'VGK', 'WSH', 'WPG'
     ];
     
     try {

@@ -16,6 +16,7 @@ const TEAMS = [
   { abbrev: 'VGK', name: 'Vegas Golden Knights', conference: 'western', color: '#B4975A' },
   { abbrev: 'MIN', name: 'Minnesota Wild', conference: 'western', color: '#154734' },
   { abbrev: 'LAK', name: 'Los Angeles Kings', conference: 'western', color: '#111111' },
+  { abbrev: 'UTA', name: 'Utah Hockey Club', conference: 'western', color: '#6CACE4' },
   { abbrev: 'VAN', name: 'Vancouver Canucks', conference: 'western', color: '#00205B' },
   
   // Eastern Conference

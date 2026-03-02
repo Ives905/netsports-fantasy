@@ -13,6 +13,14 @@ async function runSchemaMigrations() {
     await pool.query(`
       ALTER TABLE players ADD COLUMN IF NOT EXISTS headshot_url VARCHAR(500)
     `);
+
+    // Utah Hockey Club — replaced Arizona Coyotes starting 2024-25 season
+    await pool.query(`
+      INSERT INTO teams (abbrev, name, conference, color)
+      VALUES ('UTA', 'Utah Hockey Club', 'western', '#6CACE4')
+      ON CONFLICT (abbrev) DO NOTHING
+    `);
+
     console.log('✓ Schema up to date');
   } catch (err) {
     console.error('Schema migration warning:', err.message);
