@@ -395,13 +395,13 @@ const TextInput = React.memo(({ value, onChange, ...props }) => {
   );
 });
 
-const PlayerFilter = ({ searchTerm, setSearchTerm, teamFilter, setTeamFilter, teams }) => (
+const PlayerFilter = ({ searchTerm, setSearchTerm, teamFilter, setTeamFilter, teams, sortBy, setSortBy }) => (
   <div className="flex flex-col sm:flex-row gap-3 mb-6">
     <div className="flex-1 relative">
-      <SearchInput 
-        value={searchTerm} 
-        onChange={setSearchTerm} 
-        placeholder="Search players..." 
+      <SearchInput
+        value={searchTerm}
+        onChange={setSearchTerm}
+        placeholder="Search players..."
         className="w-full bg-slate-700 border border-slate-600 rounded-lg px-4 py-2 pl-10 text-white placeholder-gray-400"
       />
       <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400">🔍</span>
@@ -409,6 +409,12 @@ const PlayerFilter = ({ searchTerm, setSearchTerm, teamFilter, setTeamFilter, te
     <select value={teamFilter} onChange={(e) => setTeamFilter(e.target.value)} className="bg-slate-700 border border-slate-600 rounded-lg px-4 py-2 text-white">
       <option value="">All Teams</option>
       {teams.map(team => (<option key={team} value={team}>{team}</option>))}
+    </select>
+    <select value={sortBy} onChange={(e) => setSortBy(e.target.value)} className="bg-slate-700 border border-slate-600 rounded-lg px-4 py-2 text-white">
+      <option value="cost_desc">$ High → Low</option>
+      <option value="cost_asc">$ Low → High</option>
+      <option value="name_asc">Name A → Z</option>
+      <option value="name_desc">Name Z → A</option>
     </select>
     {(searchTerm || teamFilter) && (
       <button onClick={() => { setSearchTerm(''); setTeamFilter(''); }} className="bg-slate-600 text-gray-300 px-4 py-2 rounded-lg hover:bg-slate-500">Clear</button>
@@ -542,6 +548,7 @@ function AppContent() {
   const [joinCode, setJoinCode] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
   const [teamFilter, setTeamFilter] = useState('');
+  const [sortBy, setSortBy] = useState('cost_desc');
   const [passwordForm, setPasswordForm] = useState({ current: '', new: '', confirm: '' });
   const [passwordErr, setPasswordErr] = useState('');
   const [adminTab, setAdminTab] = useState('general');
@@ -935,17 +942,15 @@ function AppContent() {
       const matchesTeam = !teamFilter || p.team_abbrev === teamFilter;
       return matchesSearch && matchesTeam;
     });
-    
-    // Debug logging
-    if (teamFilter && filtered.length === 0 && playerList.length > 0) {
-      console.log('Team filter debug:', { 
-        teamFilter, 
-        samplePlayer: playerList[0],
-        totalPlayers: playerList.length,
-        filteredCount: filtered.length 
-      });
-    }
-    
+
+    filtered.sort((a, b) => {
+      if (sortBy === 'cost_desc') return b.cost - a.cost;
+      if (sortBy === 'cost_asc') return a.cost - b.cost;
+      if (sortBy === 'name_asc') return a.name.localeCompare(b.name);
+      if (sortBy === 'name_desc') return b.name.localeCompare(a.name);
+      return 0;
+    });
+
     return filtered;
   };
 
@@ -1113,20 +1118,38 @@ function AppContent() {
             </div>
           </div>
         </div>
-        <PlayerFilter searchTerm={searchTerm} setSearchTerm={setSearchTerm} teamFilter={teamFilter} setTeamFilter={setTeamFilter} teams={uniqueTeams} />
-        {['western', 'eastern'].map(conf => (
-          <div key={conf} className="mb-12">
-            <h2 className="text-2xl font-black text-white uppercase mb-6">{conf} Conference</h2>
+        <PlayerFilter searchTerm={searchTerm} setSearchTerm={setSearchTerm} teamFilter={teamFilter} setTeamFilter={setTeamFilter} teams={uniqueTeams} sortBy={sortBy} setSortBy={setSortBy} />
+
+        {/* ── FILTER ACTIVE: flat results across both conferences ── */}
+        {(searchTerm || teamFilter) ? (
+          <div className="mb-12">
+            <h2 className="text-2xl font-black text-white uppercase mb-1">
+              {teamFilter ? `${teamFilter} Players` : 'Search Results'}
+            </h2>
+            {teamFilter && (() => {
+              const allPlayers = [...playersByConf.eastern.forwards, ...playersByConf.eastern.defense, ...playersByConf.eastern.goalies,
+                                  ...playersByConf.western.forwards, ...playersByConf.western.defense, ...playersByConf.western.goalies];
+              const match = allPlayers.find(p => p.team_abbrev === teamFilter);
+              if (match) return <p className="text-gray-400 text-sm mb-6">{match.conference === 'eastern' ? 'Eastern' : 'Western'} Conference</p>;
+              return null;
+            })()}
             {['forwards', 'defense', 'goalies'].map(pos => {
-              const max = pos === 'forwards' ? 3 : pos === 'defense' ? 2 : 1;
-              const selected = currentRoster[conf]?.[pos] || [];
-              const posPlayers = filterPlayers(playersByConf[conf]?.[pos] || []);
+              const allForPos = [
+                ...(playersByConf.eastern[pos] || []),
+                ...(playersByConf.western[pos] || [])
+              ];
+              const posPlayers = filterPlayers(allForPos);
               return (
                 <div key={pos} className="mb-8">
-                  <div className="flex justify-between mb-4"><h3 className="text-lg font-bold text-gray-300 uppercase">{pos}</h3><span className="text-sm text-gray-400">{selected.length}/{max}</span></div>
-                  {posPlayers.length === 0 ? (<div className="text-gray-500 text-center py-8">No players match your search</div>) : (
+                  <h3 className="text-lg font-bold text-gray-300 uppercase mb-4">{pos}</h3>
+                  {posPlayers.length === 0 ? (
+                    <div className="text-gray-500 text-center py-8">No players found</div>
+                  ) : (
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
                       {posPlayers.filter(p => !p.isEliminated).map(player => {
+                        const conf = player.conference;
+                        const selected = currentRoster[conf]?.[pos] || [];
+                        const max = pos === 'forwards' ? 3 : pos === 'defense' ? 2 : 1;
                         const isSel = selected.includes(player.id);
                         const starType = pos === 'forwards' ? 'forward' : pos === 'defense' ? 'defense' : 'goalie';
                         const isStar = stars[starType] === player.id;
@@ -1139,7 +1162,41 @@ function AppContent() {
               );
             })}
           </div>
-        ))}
+
+        ) : (
+          /* ── DEFAULT: conference sections, Eastern first ── */
+          ['eastern', 'western'].map(conf => (
+            <div key={conf} className="mb-12">
+              <h2 className="text-2xl font-black text-white uppercase mb-6">{conf} Conference</h2>
+              {['forwards', 'defense', 'goalies'].map(pos => {
+                const max = pos === 'forwards' ? 3 : pos === 'defense' ? 2 : 1;
+                const selected = currentRoster[conf]?.[pos] || [];
+                const posPlayers = filterPlayers(playersByConf[conf]?.[pos] || []);
+                return (
+                  <div key={pos} className="mb-8">
+                    <div className="flex justify-between mb-4">
+                      <h3 className="text-lg font-bold text-gray-300 uppercase">{pos}</h3>
+                      <span className="text-sm text-gray-400">{selected.length}/{max}</span>
+                    </div>
+                    {posPlayers.length === 0 ? (
+                      <div className="text-gray-500 text-center py-8">No players in this group</div>
+                    ) : (
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                        {posPlayers.filter(p => !p.isEliminated).map(player => {
+                          const isSel = selected.includes(player.id);
+                          const starType = pos === 'forwards' ? 'forward' : pos === 'defense' ? 'defense' : 'goalie';
+                          const isStar = stars[starType] === player.id;
+                          const canSelect = !locked && !isSel && selected.length < max && salary + player.cost <= SALARY_CAP;
+                          return <PlayerCard key={player.id} player={player} isSelected={isSel} isStar={isStar} canSelect={canSelect} onToggle={() => togglePlayer(conf, pos, player.id)} onToggleStar={() => toggleStar(starType, player.id)} locked={locked} />;
+                        })}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          ))
+        )}
         <TiebreakerSection round={pickRound} tiebreakers={tiebreakers} setTiebreakers={setTiebreakers} locked={locked} />
       </div>
     );
