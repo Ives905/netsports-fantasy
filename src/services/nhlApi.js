@@ -180,23 +180,49 @@ class NHLApiService {
       const costDistribution = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
 
       for (const player of playersResult.rows) {
-        let newCost;
         const nhlId = parseInt(player.nhl_id);
+        let newCost;
+        let regGp = null, regGoals = null, regAssists = null, regPoints = null;
+        let regWins = null, regSavePct = null, regGaa = null;
 
         if (player.position === 'goalie') {
           const stats = goalieStats[nhlId];
           newCost = this.calculateGoalieCost(stats);
-          if (!stats) noStats++;
+          if (stats) {
+            regGp      = stats.gamesPlayed || 0;
+            regWins    = stats.wins || 0;
+            regSavePct = stats.savePct || stats.savePctg || null;
+            regGaa     = stats.goalsAgainstAverage || stats.gaa || null;
+          } else {
+            noStats++;
+          }
         } else {
           const stats = skaterStats[nhlId];
           newCost = this.calculateSkaterCost(stats, player.position);
-          if (!stats) noStats++;
+          if (stats) {
+            regGp      = stats.gamesPlayed || 0;
+            regGoals   = stats.goals   || 0;
+            regAssists = stats.assists || 0;
+            regPoints  = stats.points  || 0;
+          } else {
+            noStats++;
+          }
         }
 
-        await pool.query(
-          'UPDATE players SET cost = $1, updated_at = NOW() WHERE id = $2',
-          [newCost, player.id]
-        );
+        await pool.query(`
+          UPDATE players SET
+            cost         = $1,
+            reg_gp       = $2,
+            reg_goals    = $3,
+            reg_assists  = $4,
+            reg_points   = $5,
+            reg_wins     = $6,
+            reg_save_pct = $7,
+            reg_gaa      = $8,
+            updated_at   = NOW()
+          WHERE id = $9
+        `, [newCost, regGp, regGoals, regAssists, regPoints, regWins, regSavePct, regGaa, player.id]);
+
         updated++;
         costDistribution[newCost] = (costDistribution[newCost] || 0) + 1;
       }

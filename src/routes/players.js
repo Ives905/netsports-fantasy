@@ -22,6 +22,13 @@ router.get('/', async (req, res) => {
         p.team_abbrev,
         p.cost,
         p.headshot_url,
+        p.reg_gp,
+        p.reg_goals,
+        p.reg_assists,
+        p.reg_points,
+        p.reg_wins,
+        p.reg_save_pct,
+        p.reg_gaa,
         t.conference
       FROM players p
       LEFT JOIN teams t ON p.team_abbrev = t.abbrev

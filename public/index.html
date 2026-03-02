@@ -292,14 +292,20 @@ const PlayerImage = ({ player, size = 'md' }) => {
 
 const PlayerCard = ({ player, isSelected, isStar, canSelect, onToggle, onToggleStar, locked }) => {
   const isGoalie = player.position === 'goalie';
-  const stats = player.stats || {};
-  const getPts = (r) => {
-    const s = stats[`r${r}`] || {};
-    if (isGoalie) return (s.w || 0) * 2 + (s.so || 0);
-    return (s.g || 0) + (s.a || 0);
+
+  // Format save percentage: .912 → ".912"
+  const fmtSvPct = (v) => {
+    if (v == null) return '---';
+    const n = parseFloat(v);
+    return isNaN(n) ? '---' : n.toFixed(3).replace(/^0/, '');
   };
-  const r1 = getPts(1), r2 = getPts(2), r3 = getPts(3), total = r1 + r2 + r3;
-  
+  // Format GAA: 2.7 → "2.70"
+  const fmtGaa = (v) => {
+    if (v == null) return '---';
+    const n = parseFloat(v);
+    return isNaN(n) ? '---' : n.toFixed(2);
+  };
+
   return (
     <div className={`relative p-4 rounded-xl border-2 transition-all cursor-pointer ${isSelected ? 'bg-slate-700 border-red-500' : canSelect ? 'bg-slate-800/50 border-slate-600 hover:border-slate-400' : 'bg-slate-900/50 border-slate-700 opacity-50 cursor-not-allowed'}`}
       onClick={() => (isSelected || canSelect) && onToggle()}>
@@ -315,17 +321,84 @@ const PlayerCard = ({ player, isSelected, isStar, canSelect, onToggle, onToggleS
         </div>
         <div className="bg-amber-500 text-black font-black text-sm px-3 py-1 rounded-lg">${player.cost}</div>
       </div>
+
+      {/* Regular-season stats row */}
       <div className="grid grid-cols-4 gap-1 pt-3 border-t border-slate-600 text-xs">
-        <div className="text-center"><div className="text-gray-500">R1</div><div className="text-white font-bold">{r1}</div></div>
-        <div className="text-center"><div className="text-gray-500">R2</div><div className="text-white font-bold">{r2}</div></div>
-        <div className="text-center"><div className="text-gray-500">R3</div><div className="text-white font-bold">{r3}</div></div>
-        <div className="text-center"><div className="text-amber-400">TOT</div><div className="text-amber-400 font-bold">{total}</div></div>
+        {isGoalie ? (
+          <>
+            <div className="text-center"><div className="text-gray-500">GP</div><div className="text-white font-bold">{player.reg_gp ?? '—'}</div></div>
+            <div className="text-center"><div className="text-gray-500">W</div><div className="text-white font-bold">{player.reg_wins ?? '—'}</div></div>
+            <div className="text-center"><div className="text-gray-500">SV%</div><div className="text-white font-bold">{fmtSvPct(player.reg_save_pct)}</div></div>
+            <div className="text-center"><div className="text-amber-400">GAA</div><div className="text-amber-400 font-bold">{fmtGaa(player.reg_gaa)}</div></div>
+          </>
+        ) : (
+          <>
+            <div className="text-center"><div className="text-gray-500">GP</div><div className="text-white font-bold">{player.reg_gp ?? '—'}</div></div>
+            <div className="text-center"><div className="text-gray-500">G</div><div className="text-white font-bold">{player.reg_goals ?? '—'}</div></div>
+            <div className="text-center"><div className="text-gray-500">A</div><div className="text-white font-bold">{player.reg_assists ?? '—'}</div></div>
+            <div className="text-center"><div className="text-amber-400">PTS</div><div className="text-amber-400 font-bold">{player.reg_points ?? '—'}</div></div>
+          </>
+        )}
       </div>
+
       {isSelected && !locked && onToggleStar && (
         <button onClick={e => { e.stopPropagation(); onToggleStar(); }}
           className={`mt-3 w-full px-3 py-2 text-xs font-bold rounded-lg ${isStar ? 'bg-yellow-500 text-black' : 'bg-slate-600 text-gray-300 hover:bg-slate-500'}`}>
           {isStar ? '⭐ STAR PLAYER' : 'Set as Star'}
         </button>
+      )}
+    </div>
+  );
+};
+
+// Custom team picker dropdown — native <select> can't show images
+const TeamLogoDropdown = ({ value, onChange, teams }) => {
+  const [open, setOpen] = useState(false);
+  const ref = React.useRef(null);
+
+  React.useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (ref.current && !ref.current.contains(e.target)) setOpen(false);
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  return (
+    <div className="relative" ref={ref}>
+      <button
+        onClick={() => setOpen(o => !o)}
+        className="flex items-center gap-2 bg-slate-700 border border-slate-600 rounded-lg px-4 py-2 text-white min-w-[130px] hover:bg-slate-600">
+        {value ? (
+          <>
+            <img src={`https://assets.nhle.com/logos/nhl/svg/${value}_light.svg`} alt={value} className="w-5 h-5 object-contain flex-shrink-0" />
+            <span className="font-semibold">{value}</span>
+          </>
+        ) : (
+          <span className="text-gray-300">All Teams</span>
+        )}
+        <svg className="ml-auto w-4 h-4 text-gray-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+        </svg>
+      </button>
+
+      {open && (
+        <div className="absolute top-full mt-1 left-0 z-50 bg-slate-800 border border-slate-600 rounded-lg shadow-xl max-h-72 overflow-y-auto w-44">
+          <button
+            onClick={() => { onChange(''); setOpen(false); }}
+            className={`flex items-center gap-2 w-full px-4 py-2 text-left hover:bg-slate-700 ${!value ? 'text-white font-semibold' : 'text-gray-300'}`}>
+            All Teams
+          </button>
+          {teams.map(team => (
+            <button
+              key={team}
+              onClick={() => { onChange(team); setOpen(false); }}
+              className={`flex items-center gap-2 w-full px-4 py-2 text-left hover:bg-slate-700 ${value === team ? 'bg-slate-700 text-white font-semibold' : 'text-gray-300'}`}>
+              <img src={`https://assets.nhle.com/logos/nhl/svg/${team}_light.svg`} alt={team} className="w-5 h-5 object-contain flex-shrink-0" />
+              <span>{team}</span>
+            </button>
+          ))}
+        </div>
       )}
     </div>
   );
@@ -406,10 +479,7 @@ const PlayerFilter = ({ searchTerm, setSearchTerm, teamFilter, setTeamFilter, te
       />
       <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400">🔍</span>
     </div>
-    <select value={teamFilter} onChange={(e) => setTeamFilter(e.target.value)} className="bg-slate-700 border border-slate-600 rounded-lg px-4 py-2 text-white">
-      <option value="">All Teams</option>
-      {teams.map(team => (<option key={team} value={team}>{team}</option>))}
-    </select>
+    <TeamLogoDropdown value={teamFilter} onChange={setTeamFilter} teams={teams} />
     <select value={sortBy} onChange={(e) => setSortBy(e.target.value)} className="bg-slate-700 border border-slate-600 rounded-lg px-4 py-2 text-white">
       <option value="cost_desc">$ High → Low</option>
       <option value="cost_asc">$ Low → High</option>

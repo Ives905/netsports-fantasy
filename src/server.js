@@ -14,6 +14,17 @@ async function runSchemaMigrations() {
       ALTER TABLE players ADD COLUMN IF NOT EXISTS headshot_url VARCHAR(500)
     `);
 
+    // Regular-season stats columns (populated by updatePlayerCosts admin action)
+    await pool.query(`
+      ALTER TABLE players ADD COLUMN IF NOT EXISTS reg_gp      INT;
+      ALTER TABLE players ADD COLUMN IF NOT EXISTS reg_goals   INT;
+      ALTER TABLE players ADD COLUMN IF NOT EXISTS reg_assists INT;
+      ALTER TABLE players ADD COLUMN IF NOT EXISTS reg_points  INT;
+      ALTER TABLE players ADD COLUMN IF NOT EXISTS reg_wins    INT;
+      ALTER TABLE players ADD COLUMN IF NOT EXISTS reg_save_pct DECIMAL(5,3);
+      ALTER TABLE players ADD COLUMN IF NOT EXISTS reg_gaa      DECIMAL(4,2);
+    `);
+
     // Utah Hockey Club — replaced Arizona Coyotes starting 2024-25 season
     await pool.query(`
       INSERT INTO teams (abbrev, name, conference, color)
