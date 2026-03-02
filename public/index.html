@@ -251,30 +251,43 @@ const UpdateBanner = ({ lastUpdate, round, verified, onRefresh, isRefreshing, is
 };
 
 const PlayerImage = ({ player, size = 'md' }) => {
-  const [imgError, setImgError] = useState(false);
+  // fallbackLevel: 0 = headshot, 1 = team logo, 2 = initials
+  const [fallbackLevel, setFallbackLevel] = useState(0);
   const playerId = player.nhl_id || player.nhlId;
-  const [imgSrc, setImgSrc] = useState(getPlayerHeadshot(playerId));
+  const teamAbbrev = player.team_abbrev || player.teamAbbrev;
   const sizeClasses = { sm: 'w-10 h-10 text-xs', md: 'w-12 h-12 text-sm', lg: 'w-16 h-16 text-base' };
-  
-  const handleError = () => {
-    if (imgSrc.includes('assets.nhle.com')) {
-      setImgSrc(`https://cms.nhl.bamgrid.com/images/headshots/current/168x168/${playerId}.jpg`);
-    } else if (imgSrc.includes('cms.nhl.bamgrid.com')) {
-      setImgSrc(`https://nhl.bamcontent.com/images/headshots/current/168x168/${playerId}@2x.jpg`);
-    } else {
-      setImgError(true);
-    }
-  };
-  
-  if (imgError || !playerId) {
+
+  const handleError = () => setFallbackLevel(prev => prev + 1);
+
+  const Initials = () => (
+    <div className={`${sizeClasses[size]} rounded-full flex items-center justify-center text-white font-bold bg-slate-700`}>
+      {player.name ? player.name.split(' ').map(n => n[0]).join('') : '?'}
+    </div>
+  );
+
+  if (!playerId || fallbackLevel >= 2) return <Initials />;
+
+  if (fallbackLevel === 1) {
+    if (!teamAbbrev) return <Initials />;
     return (
-      <div className={`${sizeClasses[size]} rounded-full flex items-center justify-center text-white font-bold`} style={{ backgroundColor: player.teamColor || '#334155' }}>
-        {player.name.split(' ').map(n => n[0]).join('')}
+      <div className={`${sizeClasses[size]} rounded-full flex items-center justify-center bg-slate-800 overflow-hidden`}>
+        <img
+          src={`https://assets.nhle.com/logos/nhl/svg/${teamAbbrev}_light.svg`}
+          alt={teamAbbrev}
+          className="w-full h-full object-contain p-1"
+          onError={handleError}
+        />
       </div>
     );
   }
+
   return (
-    <img src={imgSrc} alt={player.name} className={`${sizeClasses[size]} rounded-full object-cover bg-slate-700`} onError={handleError} />
+    <img
+      src={`https://assets.nhle.com/mugs/nhl/20252026/${playerId}.png`}
+      alt={player.name}
+      className={`${sizeClasses[size]} rounded-full object-cover bg-slate-700`}
+      onError={handleError}
+    />
   );
 };
 
@@ -298,7 +311,7 @@ const PlayerCard = ({ player, isSelected, isStar, canSelect, onToggle, onToggleS
           <PlayerImage player={player} size="md" />
           <div>
             <div className="text-white font-semibold">{player.name}</div>
-            <div className="text-gray-400 text-sm">{player.team}</div>
+            <div className="text-gray-400 text-sm">{player.team_abbrev || player.teamAbbrev || player.team}</div>
           </div>
         </div>
         <div className="bg-amber-500 text-black font-black text-sm px-3 py-1 rounded-lg">${player.cost}</div>
