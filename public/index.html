@@ -1014,12 +1014,13 @@ function AppContent() {
       return matchesSearch && matchesTeam;
     });
 
+    const lastName = (n) => { const parts = (n || '').trim().split(' '); return parts[parts.length - 1]; };
     filtered.sort((a, b) => {
       if (sortBy === 'team_asc') return (a.team_abbrev || '').localeCompare(b.team_abbrev || '');
       if (sortBy === 'cost_desc') return b.cost - a.cost;
       if (sortBy === 'cost_asc') return a.cost - b.cost;
-      if (sortBy === 'name_asc') return a.name.localeCompare(b.name);
-      if (sortBy === 'name_desc') return b.name.localeCompare(a.name);
+      if (sortBy === 'name_asc') return lastName(a.name).localeCompare(lastName(b.name));
+      if (sortBy === 'name_desc') return lastName(b.name).localeCompare(lastName(a.name));
       return 0;
     });
 
