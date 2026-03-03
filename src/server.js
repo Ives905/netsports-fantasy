@@ -7,40 +7,42 @@ const rateLimit = require('express-rate-limit');
 const axios = require('axios');
 const pool = require('../config/database');
 
-// Safe schema updates — idempotent, run on every startup
-async function runSchemaMigrations() {
+// Run a single migration step — failures are logged but never abort subsequent steps
+async function runMigration(label, sql) {
   try {
-    await pool.query(`
-      ALTER TABLE players ADD COLUMN IF NOT EXISTS headshot_url VARCHAR(500)
-    `);
-
-    // Regular-season stats columns (populated by updatePlayerCosts admin action)
-    await pool.query(`
-      ALTER TABLE players ADD COLUMN IF NOT EXISTS reg_gp      INT;
-      ALTER TABLE players ADD COLUMN IF NOT EXISTS reg_goals   INT;
-      ALTER TABLE players ADD COLUMN IF NOT EXISTS reg_assists INT;
-      ALTER TABLE players ADD COLUMN IF NOT EXISTS reg_points  INT;
-      ALTER TABLE players ADD COLUMN IF NOT EXISTS reg_wins    INT;
-      ALTER TABLE players ADD COLUMN IF NOT EXISTS reg_save_pct DECIMAL(5,3);
-      ALTER TABLE players ADD COLUMN IF NOT EXISTS reg_gaa      DECIMAL(4,2);
-    `);
-
-    // Utah Hockey Club — replaced Arizona Coyotes starting 2024-25 season
-    await pool.query(`
-      INSERT INTO teams (abbrev, name, conference, color)
-      VALUES ('UTA', 'Utah Hockey Club', 'western', '#6CACE4')
-      ON CONFLICT (abbrev) DO NOTHING
-    `);
-
-    // Remove Arizona Coyotes — franchise relocated, no longer exists.
-    // Reassign any stray ARI players to UTA first so the FK doesn't block deletion.
-    await pool.query(`UPDATE players SET team_abbrev = 'UTA' WHERE team_abbrev = 'ARI'`);
-    await pool.query(`DELETE FROM teams WHERE abbrev = 'ARI'`);
-
-    console.log('✓ Schema up to date');
+    await pool.query(sql);
   } catch (err) {
-    console.error('Schema migration warning:', err.message);
+    console.warn(`Migration warning [${label}]:`, err.message);
   }
+}
+
+// Safe schema updates — idempotent, run on every startup.
+// Each step is isolated so one failure never silently blocks the rest.
+async function runSchemaMigrations() {
+  await runMigration('headshot_url',   `ALTER TABLE players ADD COLUMN IF NOT EXISTS headshot_url  VARCHAR(500)`);
+
+  // Regular-season stats columns (populated by "Recalculate Player Values" admin action)
+  await runMigration('reg_gp',         `ALTER TABLE players ADD COLUMN IF NOT EXISTS reg_gp        INT`);
+  await runMigration('reg_goals',      `ALTER TABLE players ADD COLUMN IF NOT EXISTS reg_goals      INT`);
+  await runMigration('reg_assists',    `ALTER TABLE players ADD COLUMN IF NOT EXISTS reg_assists    INT`);
+  await runMigration('reg_points',     `ALTER TABLE players ADD COLUMN IF NOT EXISTS reg_points     INT`);
+  await runMigration('reg_wins',       `ALTER TABLE players ADD COLUMN IF NOT EXISTS reg_wins       INT`);
+  await runMigration('reg_save_pct',   `ALTER TABLE players ADD COLUMN IF NOT EXISTS reg_save_pct   DECIMAL(5,3)`);
+  await runMigration('reg_gaa',        `ALTER TABLE players ADD COLUMN IF NOT EXISTS reg_gaa        DECIMAL(4,2)`);
+
+  // Utah Hockey Club — replaced Arizona Coyotes starting 2024-25 season
+  await runMigration('insert_UTA', `
+    INSERT INTO teams (abbrev, name, conference, color)
+    VALUES ('UTA', 'Utah Hockey Club', 'western', '#6CACE4')
+    ON CONFLICT (abbrev) DO NOTHING
+  `);
+
+  // Remove Arizona Coyotes — franchise relocated, no longer exists.
+  // Move any stray ARI players to UTA first so the FK constraint doesn't block deletion.
+  await runMigration('migrate_ARI_players', `UPDATE players SET team_abbrev = 'UTA' WHERE team_abbrev = 'ARI'`);
+  await runMigration('delete_ARI',          `DELETE FROM teams WHERE abbrev = 'ARI'`);
+
+  console.log('✓ Schema migrations complete');
 }
 
 /**
