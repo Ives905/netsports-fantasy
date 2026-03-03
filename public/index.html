@@ -481,6 +481,7 @@ const PlayerFilter = ({ searchTerm, setSearchTerm, teamFilter, setTeamFilter, te
     </div>
     <TeamLogoDropdown value={teamFilter} onChange={setTeamFilter} teams={teams} />
     <select value={sortBy} onChange={(e) => setSortBy(e.target.value)} className="bg-slate-700 border border-slate-600 rounded-lg px-4 py-2 text-white">
+      <option value="team_asc">Team A → Z</option>
       <option value="cost_desc">$ High → Low</option>
       <option value="cost_asc">$ Low → High</option>
       <option value="name_asc">Name A → Z</option>
@@ -618,7 +619,7 @@ function AppContent() {
   const [joinCode, setJoinCode] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
   const [teamFilter, setTeamFilter] = useState('');
-  const [sortBy, setSortBy] = useState('cost_desc');
+  const [sortBy, setSortBy] = useState('team_asc');
   const [passwordForm, setPasswordForm] = useState({ current: '', new: '', confirm: '' });
   const [passwordErr, setPasswordErr] = useState('');
   const [adminTab, setAdminTab] = useState('general');
@@ -1014,6 +1015,7 @@ function AppContent() {
     });
 
     filtered.sort((a, b) => {
+      if (sortBy === 'team_asc') return (a.team_abbrev || '').localeCompare(b.team_abbrev || '');
       if (sortBy === 'cost_desc') return b.cost - a.cost;
       if (sortBy === 'cost_asc') return a.cost - b.cost;
       if (sortBy === 'name_asc') return a.name.localeCompare(b.name);
