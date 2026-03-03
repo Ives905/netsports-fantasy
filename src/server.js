@@ -32,6 +32,11 @@ async function runSchemaMigrations() {
       ON CONFLICT (abbrev) DO NOTHING
     `);
 
+    // Remove Arizona Coyotes — franchise relocated, no longer exists.
+    // Reassign any stray ARI players to UTA first so the FK doesn't block deletion.
+    await pool.query(`UPDATE players SET team_abbrev = 'UTA' WHERE team_abbrev = 'ARI'`);
+    await pool.query(`DELETE FROM teams WHERE abbrev = 'ARI'`);
+
     console.log('✓ Schema up to date');
   } catch (err) {
     console.error('Schema migration warning:', err.message);
