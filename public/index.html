@@ -1804,20 +1804,22 @@ function AppContent() {
             <div className="space-y-4">
               <p className="text-gray-400 text-sm">Select which teams qualify for each round.</p>
               {[0, 1, 2, 3].map(roundNum => {
-                const maxTeams = roundNum === 0 ? 32 : roundNum === 1 ? 16 : roundNum === 2 ? 8 : 4;
+                const isTesting = roundNum === 0;
+                const maxTeams = isTesting ? null : roundNum === 1 ? 16 : roundNum === 2 ? 8 : 4;
                 const selectedCount = (selectedTeams[roundNum] || []).length;
+                const isReady = isTesting ? selectedCount >= 1 : selectedCount === maxTeams;
                 const easternTeams = adminTeams.filter(t => t.conference === 'eastern');
                 const westernTeams = adminTeams.filter(t => t.conference === 'western');
-                
+
                 return (
                   <div key={roundNum} className="bg-slate-700/50 rounded-lg p-4">
                     <div className="flex items-center justify-between mb-3">
                       <div className="text-white font-semibold">
                         {ROUND_NAMES[roundNum]}
-                        {roundNum === 0 && <span className="ml-2 text-xs bg-amber-600 px-2 py-1 rounded">TESTING</span>}
+                        {isTesting && <span className="ml-2 text-xs bg-amber-600 px-2 py-1 rounded">TESTING</span>}
                       </div>
-                      <div className={`text-xs font-semibold ${selectedCount > maxTeams ? 'text-red-400' : selectedCount === maxTeams ? 'text-emerald-400' : 'text-gray-400'}`}>
-                        {selectedCount} / {maxTeams} teams
+                      <div className={`text-xs font-semibold ${!isTesting && selectedCount > maxTeams ? 'text-red-400' : isReady ? 'text-emerald-400' : 'text-gray-400'}`}>
+                        {isTesting ? `${selectedCount} team${selectedCount !== 1 ? 's' : ''} selected` : `${selectedCount} / ${maxTeams} teams`}
                       </div>
                     </div>
                     
@@ -1881,27 +1883,33 @@ function AppContent() {
                       </div>
                     </div>
 
-                    {selectedCount > maxTeams && (
+                    {!isTesting && selectedCount > maxTeams && (
                       <div className="bg-red-500/20 border border-red-500 rounded p-2 mt-3 text-center">
                         <p className="text-red-400 text-xs font-semibold">⚠️ Too many teams! Remove {selectedCount - maxTeams}</p>
                       </div>
                     )}
 
-                    {selectedCount < maxTeams && selectedCount > 0 && (
+                    {!isTesting && selectedCount < maxTeams && selectedCount > 0 && (
                       <div className="bg-amber-500/20 border border-amber-500 rounded p-2 mt-3 text-center">
                         <p className="text-amber-400 text-xs font-semibold">Select {maxTeams - selectedCount} more team{maxTeams - selectedCount > 1 ? 's' : ''}</p>
                       </div>
                     )}
-                    
-                    <button 
+
+                    {isTesting && selectedCount === 0 && (
+                      <div className="bg-amber-500/20 border border-amber-500 rounded p-2 mt-3 text-center">
+                        <p className="text-amber-400 text-xs font-semibold">Select at least 1 team to save</p>
+                      </div>
+                    )}
+
+                    <button
                       onClick={() => handleUpdateQualifiedTeams(roundNum)}
-                      disabled={selectedCount !== maxTeams}
+                      disabled={!isReady}
                       className={`w-full mt-3 py-2 rounded font-bold text-sm transition-colors ${
-                        selectedCount === maxTeams
-                          ? 'bg-emerald-600 hover:bg-emerald-500 text-white' 
+                        isReady
+                          ? 'bg-emerald-600 hover:bg-emerald-500 text-white'
                           : 'bg-slate-700 text-gray-500 cursor-not-allowed'
                       }`}>
-                      {selectedCount === maxTeams ? '✓ Save Qualified Teams' : `Select exactly ${maxTeams} teams`}
+                      {isReady ? '✓ Save Qualified Teams' : isTesting ? 'Select at least 1 team' : `Select exactly ${maxTeams} teams`}
                     </button>
                   </div>
                 );

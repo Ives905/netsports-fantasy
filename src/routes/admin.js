@@ -150,11 +150,16 @@ router.post('/rounds/:roundNumber/qualified-teams', authenticateToken, verifyAdm
     }
 
     // Validate team count based on round
-    const maxTeams = roundNumber === 0 ? 32 : roundNumber === 1 ? 16 : roundNumber === 2 ? 8 : 4;
-    if (teams.length !== maxTeams) {
-      return res.status(400).json({ 
-        error: `Round ${roundNumber} requires exactly ${maxTeams} teams (you provided ${teams.length})` 
-      });
+    // Testing Round (0) accepts any number of teams (for night-by-night testing)
+    if (roundNumber !== 0) {
+      const maxTeams = roundNumber === 1 ? 16 : roundNumber === 2 ? 8 : 4;
+      if (teams.length !== maxTeams) {
+        return res.status(400).json({
+          error: `Round ${roundNumber} requires exactly ${maxTeams} teams (you provided ${teams.length})`
+        });
+      }
+    } else if (teams.length === 0) {
+      return res.status(400).json({ error: 'Select at least 1 team' });
     }
 
     await client.query('BEGIN');
