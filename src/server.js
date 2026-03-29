@@ -38,9 +38,10 @@ async function runSchemaMigrations() {
   `);
 
   // Remove Arizona Coyotes — franchise relocated, no longer exists.
-  // Move any stray ARI players to UTA first so the FK constraint doesn't block deletion.
-  await runMigration('migrate_ARI_players', `UPDATE players SET team_abbrev = 'UTA' WHERE team_abbrev = 'ARI'`);
-  await runMigration('delete_ARI',          `DELETE FROM teams WHERE abbrev = 'ARI'`);
+  // Clear ALL FK dependents first (team_qualifications, then players) before deleting the team row.
+  await runMigration('delete_ARI_qualifications', `DELETE FROM team_qualifications WHERE team_abbrev = 'ARI'`);
+  await runMigration('migrate_ARI_players',       `UPDATE players SET team_abbrev = 'UTA' WHERE team_abbrev = 'ARI'`);
+  await runMigration('delete_ARI',                `DELETE FROM teams WHERE abbrev = 'ARI'`);
 
   console.log('✓ Schema migrations complete');
 }
