@@ -50,17 +50,32 @@ router.get('/settings', async (req, res) => {
       }
     });
 
+    // Get qualified teams per round
+    const qualifiedResult = await pool.query(`
+      SELECT round_number, team_abbrev
+      FROM team_qualifications
+      WHERE qualified = true
+      ORDER BY round_number, team_abbrev
+    `);
+
+    const qualifiedTeams = {};
+    qualifiedResult.rows.forEach(row => {
+      if (!qualifiedTeams[row.round_number]) qualifiedTeams[row.round_number] = [];
+      qualifiedTeams[row.round_number].push(row.team_abbrev);
+    });
+
     // Get stats update info
     const statsResult = await pool.query(`
-      SELECT value FROM settings WHERE key IN ('stats_last_updated', 'stats_verified')
+      SELECT key, value FROM settings WHERE key IN ('stats_last_updated', 'stats_verified')
     `);
-    
+
     const lastUpdate = statsResult.rows.find(r => r.key === 'stats_last_updated')?.value || null;
     const isVerified = statsResult.rows.find(r => r.key === 'stats_verified')?.value === 'true';
 
     res.json({
       currentRound: parseInt(currentRound),
       lockDates,
+      qualifiedTeams,
       lastUpdate,
       isVerified
     });

@@ -596,7 +596,7 @@ function AppContent() {
   const [newPassword, setNewPassword] = useState('');
   const [resetStep, setResetStep] = useState('email'); // 'email', 'token', 'password'
   const [players, setPlayers] = useState([]);
-  const [settings, setSettings] = useState({ currentRound: 0, lockDates: {}, lastUpdate: null, isVerified: false });
+  const [settings, setSettings] = useState({ currentRound: 0, lockDates: {}, qualifiedTeams: {}, lastUpdate: null, isVerified: false });
   const [standings, setStandings] = useState([]);
   const [groups, setGroups] = useState([]);
   const [rosters, setRosters] = useState({ 0: null, 1: null, 2: null, 3: null });
@@ -632,7 +632,7 @@ function AppContent() {
   useEffect(() => {
     Promise.all([
       api.getPlayers().catch(() => ({ players: [] })),
-      api.getSettings().catch(() => ({ currentRound: 1, lockDates: {}, lastUpdate: null, isVerified: false })),
+      api.getSettings().catch(() => ({ currentRound: 1, lockDates: {}, qualifiedTeams: {}, lastUpdate: null, isVerified: false })),
       api.getStandings().catch(() => ({ standings: [] }))
     ]).then(([playersData, settingsData, standingsData]) => {
       setPlayers(playersData.players || []);
@@ -1162,6 +1162,18 @@ function AppContent() {
         <button onClick={() => setAuthModal({ open: true, mode: 'register' })} className="bg-red-600 text-white px-8 py-3 rounded-lg font-bold">Get Started</button>
       </div>
     );
+
+    // --- Qualified team filtering for this round ---
+    const qualifiedSet = new Set(settings.qualifiedTeams?.[pickRound] || []);
+    const hasQualified = qualifiedSet.size > 0;
+    const pickPlayers = hasQualified ? players.filter(p => qualifiedSet.has(p.team_abbrev)) : players;
+    const pickPlayersByConf = { western: { forwards: [], defense: [], goalies: [] }, eastern: { forwards: [], defense: [], goalies: [] } };
+    pickPlayers.forEach(p => {
+      const pos = p.position === 'forward' ? 'forwards' : p.position === 'defense' ? 'defense' : 'goalies';
+      if (pickPlayersByConf[p.conference]?.[pos]) pickPlayersByConf[p.conference][pos].push(p);
+    });
+    const pickUniqueTeams = hasQualified ? [...qualifiedSet].sort() : uniqueTeams;
+
     return (
       <div className="max-w-7xl mx-auto px-4 py-8">
         <div className="text-center mb-8">
@@ -1175,6 +1187,17 @@ function AppContent() {
           </div>
           <p className="text-amber-400 font-semibold mb-1">{ROUND_NAMES[pickRound]}</p>
           <p className="text-gray-400">$30 budget • 3F 2D 1G per conf • Stars = 2x</p>
+          {settings.lockDates?.[pickRound] ? (
+            <p className={`text-sm mt-2 font-semibold ${locked ? 'text-red-400' : 'text-amber-300'}`}>
+              {locked ? '🔒 Deadline passed: ' : '⏰ Picks due: '}
+              {new Date(settings.lockDates[pickRound]).toLocaleString('en-CA', {
+                timeZone: 'America/New_York', month: 'short', day: 'numeric',
+                year: 'numeric', hour: 'numeric', minute: '2-digit'
+              })} EST
+            </p>
+          ) : (
+            <p className="text-sm mt-2 text-gray-500">No deadline set for this round</p>
+          )}
         </div>
         {settings.lockDates?.[pickRound] && !locked && (
           <div className="mb-6"><CountdownTimer targetDate={settings.lockDates[pickRound]} label="Time Until Deadline" /></div>
@@ -1191,7 +1214,13 @@ function AppContent() {
             </div>
           </div>
         </div>
-        <PlayerFilter searchTerm={searchTerm} setSearchTerm={setSearchTerm} teamFilter={teamFilter} setTeamFilter={setTeamFilter} teams={uniqueTeams} sortBy={sortBy} setSortBy={setSortBy} />
+        <PlayerFilter searchTerm={searchTerm} setSearchTerm={setSearchTerm} teamFilter={teamFilter} setTeamFilter={setTeamFilter} teams={pickUniqueTeams} sortBy={sortBy} setSortBy={setSortBy} />
+
+        {!hasQualified && (
+          <div className="bg-amber-500/10 border border-amber-500/40 rounded-xl p-4 mb-6 text-center">
+            <p className="text-amber-400 text-sm font-semibold">⚠️ No teams have been set for this round yet. An admin must select qualifying teams before picks open.</p>
+          </div>
+        )}
 
         {/* ── FILTER ACTIVE: flat results across both conferences ── */}
         {(searchTerm || teamFilter) ? (
@@ -1200,16 +1229,16 @@ function AppContent() {
               {teamFilter ? `${teamFilter} Players` : 'Search Results'}
             </h2>
             {teamFilter && (() => {
-              const allPlayers = [...playersByConf.eastern.forwards, ...playersByConf.eastern.defense, ...playersByConf.eastern.goalies,
-                                  ...playersByConf.western.forwards, ...playersByConf.western.defense, ...playersByConf.western.goalies];
+              const allPlayers = [...pickPlayersByConf.eastern.forwards, ...pickPlayersByConf.eastern.defense, ...pickPlayersByConf.eastern.goalies,
+                                  ...pickPlayersByConf.western.forwards, ...pickPlayersByConf.western.defense, ...pickPlayersByConf.western.goalies];
               const match = allPlayers.find(p => p.team_abbrev === teamFilter);
               if (match) return <p className="text-gray-400 text-sm mb-6">{match.conference === 'eastern' ? 'Eastern' : 'Western'} Conference</p>;
               return null;
             })()}
             {['forwards', 'defense', 'goalies'].map(pos => {
               const allForPos = [
-                ...(playersByConf.eastern[pos] || []),
-                ...(playersByConf.western[pos] || [])
+                ...(pickPlayersByConf.eastern[pos] || []),
+                ...(pickPlayersByConf.western[pos] || [])
               ];
               const posPlayers = filterPlayers(allForPos);
               return (
@@ -1244,7 +1273,7 @@ function AppContent() {
               {['forwards', 'defense', 'goalies'].map(pos => {
                 const max = pos === 'forwards' ? 3 : pos === 'defense' ? 2 : 1;
                 const selected = currentRoster[conf]?.[pos] || [];
-                const posPlayers = filterPlayers(playersByConf[conf]?.[pos] || []);
+                const posPlayers = filterPlayers(pickPlayersByConf[conf]?.[pos] || []);
                 return (
                   <div key={pos} className="mb-8">
                     <div className="flex justify-between mb-4">
