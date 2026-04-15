@@ -98,7 +98,7 @@ router.put('/:round', authenticateToken, async (req, res) => {
       SELECT p.id, p.cost, p.position, t.conference
       FROM players p
       JOIN teams t ON p.team_abbrev = t.abbrev
-      WHERE p.id = ANY($1::int[])
+      WHERE p.id = ANY($1::uuid[])
     `, [allPlayers]);
     const totalCost = playerData.rows.reduce((sum, p) => sum + parseFloat(p.cost), 0);
     if (totalCost > SALARY_CAP) {

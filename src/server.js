@@ -43,6 +43,13 @@ async function runSchemaMigrations() {
   await runMigration('migrate_ARI_players',       `UPDATE players SET team_abbrev = 'UTA' WHERE team_abbrev = 'ARI'`);
   await runMigration('delete_ARI',                `DELETE FROM teams WHERE abbrev = 'ARI'`);
 
+  // Allow round 0 (Testing Round) in rosters and tiebreakers tables.
+  // Original CHECK was (round >= 1 AND round <= 3) which blocked the testing round.
+  await runMigration('rosters_round_check_drop',        `ALTER TABLE rosters DROP CONSTRAINT IF EXISTS rosters_round_check`);
+  await runMigration('rosters_round_check_add',         `ALTER TABLE rosters ADD CONSTRAINT rosters_round_check CHECK (round >= 0 AND round <= 3)`);
+  await runMigration('tiebreakers_round_check_drop',    `ALTER TABLE tiebreakers DROP CONSTRAINT IF EXISTS tiebreakers_round_check`);
+  await runMigration('tiebreakers_round_check_add',     `ALTER TABLE tiebreakers ADD CONSTRAINT tiebreakers_round_check CHECK (round >= 0 AND round <= 3)`);
+
   console.log('✓ Schema migrations complete');
 }
 
