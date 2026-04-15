@@ -57,6 +57,10 @@ const api = {
     const headers = { 'Content-Type': 'application/json', ...options.headers };
     if (this.token) headers['Authorization'] = `Bearer ${this.token}`;
     const response = await fetch(`${API_URL}${endpoint}`, { ...options, headers });
+    const contentType = response.headers.get('content-type') || '';
+    if (!contentType.includes('application/json')) {
+      throw new Error(`Server returned non-JSON response for ${endpoint} (status ${response.status})`);
+    }
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || 'Request failed');
     return data;
@@ -1166,7 +1170,7 @@ function AppContent() {
     // --- Qualified team filtering for this round ---
     const qualifiedSet = new Set(settings.qualifiedTeams?.[pickRound] || []);
     const hasQualified = qualifiedSet.size > 0;
-    const pickPlayers = hasQualified ? players.filter(p => qualifiedSet.has(p.team_abbrev)) : players;
+    const pickPlayers = hasQualified ? players.filter(p => qualifiedSet.has(p.team_abbrev)) : [];
     const pickPlayersByConf = { western: { forwards: [], defense: [], goalies: [] }, eastern: { forwards: [], defense: [], goalies: [] } };
     pickPlayers.forEach(p => {
       const pos = p.position === 'forward' ? 'forwards' : p.position === 'defense' ? 'defense' : 'goalies';

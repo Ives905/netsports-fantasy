@@ -198,7 +198,7 @@ app.use('/api/players', playersRoutes);
 app.use('/api/rosters', rostersRoutes);
 app.use('/api/groups', groupsRoutes);
 app.use('/api/admin', adminRoutes);
-app.use('/api', standingsRoutes);
+app.use('/api/standings', standingsRoutes);
 
 // Error handling
 app.use((err, req, res, next) => {
