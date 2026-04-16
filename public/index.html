@@ -294,66 +294,111 @@ const PlayerImage = ({ player, size = 'md' }) => {
   );
 };
 
-const PlayerCard = ({ player, isSelected, isStar, canSelect, onToggle, onToggleStar, locked }) => {
+// Compact player row for the picks list. Shows team logo, name, cost, stats, star toggle, add/remove.
+const PlayerRow = ({ player, isSelected, isStar, canSelect, onToggle, onToggleStar, locked }) => {
   const isGoalie = player.position === 'goalie';
+  const teamAbbrev = player.team_abbrev || player.teamAbbrev || player.team;
+  const [logoError, setLogoError] = React.useState(false);
 
-  // Format save percentage: .912 → ".912"
-  const fmtSvPct = (v) => {
-    if (v == null) return '---';
-    const n = parseFloat(v);
-    return isNaN(n) ? '---' : n.toFixed(3).replace(/^0/, '');
-  };
-  // Format GAA: 2.7 → "2.70"
-  const fmtGaa = (v) => {
-    if (v == null) return '---';
-    const n = parseFloat(v);
-    return isNaN(n) ? '---' : n.toFixed(2);
-  };
+  const ppg = (!isGoalie && player.reg_gp && player.reg_points != null)
+    ? (player.reg_points / player.reg_gp).toFixed(2) : '—';
+
+  const fmt = (v) => (v == null ? '—' : v);
+  const fmtSv = (v) => { if (v == null) return '—'; const n = parseFloat(v); return isNaN(n) ? '—' : n.toFixed(3).replace(/^0/, ''); };
+  const fmtGaa = (v) => { if (v == null) return '—'; const n = parseFloat(v); return isNaN(n) ? '—' : n.toFixed(2); };
 
   return (
-    <div className={`relative p-4 rounded-xl border-2 transition-all cursor-pointer ${isSelected ? 'bg-slate-700 border-red-500' : canSelect ? 'bg-slate-800/50 border-slate-600 hover:border-slate-400' : 'bg-slate-900/50 border-slate-700 opacity-50 cursor-not-allowed'}`}
-      onClick={() => (isSelected || canSelect) && onToggle()}>
-      {isSelected && <div className="absolute -top-2 -right-2 w-6 h-6 bg-red-600 rounded-full flex items-center justify-center text-white text-xs">✓</div>}
-      {isStar && <div className="absolute -top-2 -left-2 w-6 h-6 bg-yellow-500 rounded-full flex items-center justify-center">⭐</div>}
-      <div className="flex items-start justify-between mb-3">
-        <div className="flex items-center gap-3">
-          <PlayerImage player={player} size="md" />
-          <div>
-            <div className="text-white font-semibold">{player.name}</div>
-            <div className="text-gray-400 text-sm">{player.team_abbrev || player.teamAbbrev || player.team}</div>
-          </div>
-        </div>
-        <div className="bg-amber-500 text-black font-black text-sm px-3 py-1 rounded-lg">${player.cost}</div>
+    <div
+      className={`flex items-center gap-1.5 px-3 py-2 border-b border-slate-800 text-xs transition-colors select-none
+        ${isSelected ? 'bg-red-950/40 border-l-2 border-l-red-500' : canSelect ? 'hover:bg-slate-700/30 cursor-pointer' : 'opacity-40 cursor-not-allowed'}`}
+      onClick={() => (isSelected || canSelect) && onToggle()}
+    >
+      {/* 32 px team logo */}
+      <div className="w-8 h-8 flex-shrink-0 rounded bg-slate-800/60 overflow-hidden">
+        {!logoError
+          ? <img src={`https://assets.nhle.com/logos/nhl/svg/${teamAbbrev}_light.svg`} alt={teamAbbrev}
+              className="w-full h-full object-contain p-0.5" onError={() => setLogoError(true)} />
+          : <div className="w-full h-full flex items-center justify-center text-gray-500 font-bold" style={{fontSize:'8px'}}>{teamAbbrev}</div>
+        }
       </div>
 
-      {/* Regular-season stats row */}
-      <div className="grid grid-cols-4 gap-1 pt-3 border-t border-slate-600 text-xs">
-        {isGoalie ? (
-          <>
-            <div className="text-center"><div className="text-gray-500">GP</div><div className="text-white font-bold">{player.reg_gp ?? '—'}</div></div>
-            <div className="text-center"><div className="text-gray-500">W</div><div className="text-white font-bold">{player.reg_wins ?? '—'}</div></div>
-            <div className="text-center"><div className="text-gray-500">SV%</div><div className="text-white font-bold">{fmtSvPct(player.reg_save_pct)}</div></div>
-            <div className="text-center"><div className="text-amber-400">GAA</div><div className="text-amber-400 font-bold">{fmtGaa(player.reg_gaa)}</div></div>
-          </>
-        ) : (
-          <>
-            <div className="text-center"><div className="text-gray-500">GP</div><div className="text-white font-bold">{player.reg_gp ?? '—'}</div></div>
-            <div className="text-center"><div className="text-gray-500">G</div><div className="text-white font-bold">{player.reg_goals ?? '—'}</div></div>
-            <div className="text-center"><div className="text-gray-500">A</div><div className="text-white font-bold">{player.reg_assists ?? '—'}</div></div>
-            <div className="text-center"><div className="text-amber-400">PTS</div><div className="text-amber-400 font-bold">{player.reg_points ?? '—'}</div></div>
-          </>
-        )}
+      {/* Name — truncates on small screens */}
+      <div className="flex-1 min-w-0">
+        <div className="text-white font-medium leading-tight truncate">{player.name}</div>
+        {isStar && <div className="text-yellow-400 leading-none" style={{fontSize:'9px'}}>⭐ STAR</div>}
       </div>
 
-      {isSelected && !locked && onToggleStar && (
-        <button onClick={e => { e.stopPropagation(); onToggleStar(); }}
-          className={`mt-3 w-full px-3 py-2 text-xs font-bold rounded-lg ${isStar ? 'bg-yellow-500 text-black' : 'bg-slate-600 text-gray-300 hover:bg-slate-500'}`}>
-          {isStar ? '⭐ STAR PLAYER' : 'Set as Star'}
-        </button>
+      {/* Cost badge */}
+      <div className="w-7 flex-shrink-0 text-center">
+        <span className="bg-amber-500 text-black font-black rounded px-1 py-0.5">${player.cost}</span>
+      </div>
+
+      {/* Stat columns — skaters: GP G A PTS PPG | goalies: GP W SV% GAA — */}
+      {isGoalie ? (
+        <>
+          <div className="w-7 flex-shrink-0 text-center text-gray-400">{fmt(player.reg_gp)}</div>
+          <div className="w-7 flex-shrink-0 text-center text-gray-400">{fmt(player.reg_wins)}</div>
+          <div className="w-11 flex-shrink-0 text-center text-gray-300">{fmtSv(player.reg_save_pct)}</div>
+          <div className="w-9 flex-shrink-0 text-center text-amber-400">{fmtGaa(player.reg_gaa)}</div>
+          <div className="w-9 flex-shrink-0 text-center text-gray-600">—</div>
+        </>
+      ) : (
+        <>
+          <div className="w-7 flex-shrink-0 text-center text-gray-400">{fmt(player.reg_gp)}</div>
+          <div className="w-7 flex-shrink-0 text-center text-gray-400">{fmt(player.reg_goals)}</div>
+          <div className="w-7 flex-shrink-0 text-center text-gray-400">{fmt(player.reg_assists)}</div>
+          <div className="w-7 flex-shrink-0 text-center text-amber-400 font-bold">{fmt(player.reg_points)}</div>
+          <div className="w-9 flex-shrink-0 text-center text-gray-300">{ppg}</div>
+        </>
       )}
+
+      {/* Star toggle — visible only when selected and unlocked */}
+      <button
+        className={`w-7 h-7 flex-shrink-0 rounded-full flex items-center justify-center transition-colors
+          ${isSelected && !locked ? (isStar ? 'text-yellow-400 hover:text-yellow-300' : 'text-gray-600 hover:text-yellow-500') : 'invisible pointer-events-none'}`}
+        onClick={(e) => { e.stopPropagation(); isSelected && !locked && onToggleStar && onToggleStar(); }}
+        title={isStar ? 'Remove star' : 'Set as star'}
+      >⭐</button>
+
+      {/* Add / Remove */}
+      <button
+        className={`w-8 h-8 flex-shrink-0 rounded-full flex items-center justify-center font-bold text-base transition-colors
+          ${isSelected ? 'bg-red-600 text-white hover:bg-red-700' : canSelect ? 'bg-slate-600 text-white hover:bg-slate-500' : 'bg-slate-800 text-gray-600 cursor-not-allowed'}`}
+        onClick={(e) => { e.stopPropagation(); (isSelected || canSelect) && onToggle(); }}
+        disabled={!isSelected && !canSelect}
+      >{isSelected ? '−' : '+'}</button>
     </div>
   );
 };
+
+// Sticky column-label row that sits above each position group.
+// isGoalie toggles goalie-specific labels (W / SV% / GAA) vs skater labels (G / A / PTS).
+const PlayerListHeader = ({ isGoalie }) => (
+  <div className="flex items-center gap-1.5 px-3 py-1 bg-slate-900/70 text-gray-600 uppercase border-b border-slate-800"
+    style={{fontSize:'10px', letterSpacing:'0.06em'}}>
+    <div className="w-8 flex-shrink-0"></div>
+    <div className="flex-1">Player</div>
+    <div className="w-7 flex-shrink-0 text-center">$</div>
+    <div className="w-7 flex-shrink-0 text-center">GP</div>
+    {isGoalie ? (
+      <>
+        <div className="w-7 flex-shrink-0 text-center">W</div>
+        <div className="w-11 flex-shrink-0 text-center">SV%</div>
+        <div className="w-9 flex-shrink-0 text-center">GAA</div>
+        <div className="w-9 flex-shrink-0 text-center">PPG</div>
+      </>
+    ) : (
+      <>
+        <div className="w-7 flex-shrink-0 text-center">G</div>
+        <div className="w-7 flex-shrink-0 text-center">A</div>
+        <div className="w-7 flex-shrink-0 text-center">PTS</div>
+        <div className="w-9 flex-shrink-0 text-center">PPG</div>
+      </>
+    )}
+    <div className="w-7 flex-shrink-0"></div>
+    <div className="w-8 flex-shrink-0"></div>
+  </div>
+);
 
 // Custom team picker dropdown — native <select> can't show images
 const TeamLogoDropdown = ({ value, onChange, teams }) => {
@@ -1245,22 +1290,24 @@ function AppContent() {
                 ...(pickPlayersByConf.western[pos] || [])
               ];
               const posPlayers = filterPlayers(allForPos);
+              const isGoalie = pos === 'goalies';
+              const starType = pos === 'forwards' ? 'forward' : pos === 'defense' ? 'defense' : 'goalie';
               return (
-                <div key={pos} className="mb-8">
-                  <h3 className="text-lg font-bold text-gray-300 uppercase mb-4">{pos}</h3>
+                <div key={pos} className="mb-6">
+                  <h3 className="text-xs font-bold text-gray-500 uppercase tracking-widest mb-2 px-1">{pos}</h3>
                   {posPlayers.length === 0 ? (
                     <div className="text-gray-500 text-center py-8">No players found</div>
                   ) : (
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                    <div className="bg-slate-800/50 rounded-xl overflow-hidden">
+                      <PlayerListHeader isGoalie={isGoalie} />
                       {posPlayers.filter(p => !p.isEliminated).map(player => {
                         const conf = player.conference;
                         const selected = currentRoster[conf]?.[pos] || [];
                         const max = pos === 'forwards' ? 3 : pos === 'defense' ? 2 : 1;
                         const isSel = selected.includes(player.id);
-                        const starType = pos === 'forwards' ? 'forward' : pos === 'defense' ? 'defense' : 'goalie';
                         const isStar = stars[starType] === player.id;
                         const canSelect = !locked && !isSel && selected.length < max && salary + player.cost <= SALARY_CAP;
-                        return <PlayerCard key={player.id} player={player} isSelected={isSel} isStar={isStar} canSelect={canSelect} onToggle={() => togglePlayer(conf, pos, player.id)} onToggleStar={() => toggleStar(starType, player.id)} locked={locked} />;
+                        return <PlayerRow key={player.id} player={player} isSelected={isSel} isStar={isStar} canSelect={canSelect} onToggle={() => togglePlayer(conf, pos, player.id)} onToggleStar={() => toggleStar(starType, player.id)} locked={locked} />;
                       })}
                     </div>
                   )}
@@ -1278,22 +1325,24 @@ function AppContent() {
                 const max = pos === 'forwards' ? 3 : pos === 'defense' ? 2 : 1;
                 const selected = currentRoster[conf]?.[pos] || [];
                 const posPlayers = filterPlayers(pickPlayersByConf[conf]?.[pos] || []);
+                const isGoalie = pos === 'goalies';
+                const starType = pos === 'forwards' ? 'forward' : pos === 'defense' ? 'defense' : 'goalie';
                 return (
-                  <div key={pos} className="mb-8">
-                    <div className="flex justify-between mb-4">
-                      <h3 className="text-lg font-bold text-gray-300 uppercase">{pos}</h3>
-                      <span className="text-sm text-gray-400">{selected.length}/{max}</span>
+                  <div key={pos} className="mb-6">
+                    <div className="flex items-center justify-between mb-2 px-1">
+                      <h3 className="text-xs font-bold text-gray-500 uppercase tracking-widest">{pos}</h3>
+                      <span className="text-xs text-gray-500">{selected.length}/{max}</span>
                     </div>
                     {posPlayers.length === 0 ? (
                       <div className="text-gray-500 text-center py-8">No players in this group</div>
                     ) : (
-                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                      <div className="bg-slate-800/50 rounded-xl overflow-hidden">
+                        <PlayerListHeader isGoalie={isGoalie} />
                         {posPlayers.filter(p => !p.isEliminated).map(player => {
                           const isSel = selected.includes(player.id);
-                          const starType = pos === 'forwards' ? 'forward' : pos === 'defense' ? 'defense' : 'goalie';
                           const isStar = stars[starType] === player.id;
                           const canSelect = !locked && !isSel && selected.length < max && salary + player.cost <= SALARY_CAP;
-                          return <PlayerCard key={player.id} player={player} isSelected={isSel} isStar={isStar} canSelect={canSelect} onToggle={() => togglePlayer(conf, pos, player.id)} onToggleStar={() => toggleStar(starType, player.id)} locked={locked} />;
+                          return <PlayerRow key={player.id} player={player} isSelected={isSel} isStar={isStar} canSelect={canSelect} onToggle={() => togglePlayer(conf, pos, player.id)} onToggleStar={() => toggleStar(starType, player.id)} locked={locked} />;
                         })}
                       </div>
                     )}
