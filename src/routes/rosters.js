@@ -110,10 +110,10 @@ router.put('/:round', authenticateToken, async (req, res) => {
     }
     if (tiebreakers) {
       await pool.query(`
-        INSERT INTO tiebreakers (user_id, round, question_1, question_2)
+        INSERT INTO tiebreakers (user_id, round, question1_answer, question2_answer)
         VALUES ($1::uuid, $2, $3, $4)
         ON CONFLICT (user_id, round) DO UPDATE
-        SET question_1 = $3, question_2 = $4
+        SET question1_answer = $3, question2_answer = $4
       `, [req.user.id, round, tiebreakers.q1, tiebreakers.q2]);
     }
     res.json({ message: 'Roster saved successfully' });
@@ -236,11 +236,12 @@ router.get('/user/:userId/round/:round', authenticateToken, async (req, res) => 
       }
     });
     const tiebreakerResult = await pool.query(`
-      SELECT question_1, question_2
+      SELECT question1_answer, question2_answer
       FROM tiebreakers
       WHERE user_id = $1 AND round = $2
     `, [userId, round]);
-    const tiebreakers = tiebreakerResult.rows[0] || { question_1: null, question_2: null };
+    const tbRow = tiebreakerResult.rows[0] || {};
+    const tiebreakers = { q1: tbRow.question1_answer ?? null, q2: tbRow.question2_answer ?? null };
     res.json({
       user,
       round,
