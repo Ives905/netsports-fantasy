@@ -145,8 +145,9 @@ class NHLApiService {
     try {
       console.log(`Fetching ${this.season} regular-season stats to calculate player values...`);
 
-      // Pull bulk skater + goalie stats in parallel (gameTypeId=2 = regular season)
-      const [skaterRes, goalieRes] = await Promise.all([
+      // Pull bulk skater stats, goalie stats, and team standings in parallel
+      // gameTypeId=2 = regular season
+      const [skaterRes, goalieRes, standingsRes] = await Promise.all([
         axios.get(`${NHL_STATS_BASE}/skater/summary`, {
           params: { limit: -1, cayenneExp: `seasonId=${this.season} and gameTypeId=2` },
           timeout: 15000
@@ -154,7 +155,9 @@ class NHLApiService {
         axios.get(`${NHL_STATS_BASE}/goalie/summary`, {
           params: { limit: -1, cayenneExp: `seasonId=${this.season} and gameTypeId=2` },
           timeout: 15000
-        })
+        }),
+        axios.get(`${NHL_API_BASE}/standings/now`, { timeout: 10000 })
+          .catch(err => { console.warn('Standings fetch failed, goalie composite will use SV% fallback:', err.message); return null; })
       ]);
 
       // Build playerId → stats lookup maps
@@ -167,12 +170,25 @@ class NHLApiService {
         goalieStats[g.playerId] = g;
       }
 
+      // Build teamAbbrev → points percentage for goalie composite score
+      // points% = team points / (games played × 2)
+      const teamPtsPct = {};
+      for (const team of (standingsRes?.data?.standings || [])) {
+        const abbrev = team.teamAbbrev?.default || team.teamAbbrev;
+        const gp = team.gamesPlayed || 0;
+        const pts = team.points || 0;
+        if (abbrev && gp > 0) {
+          teamPtsPct[abbrev] = pts / (gp * 2);
+        }
+      }
+      console.log(`Loaded standings for ${Object.keys(teamPtsPct).length} teams`);
+
       const leagueTotal = Object.keys(skaterStats).length + Object.keys(goalieStats).length;
       console.log(`Loaded stats for ${leagueTotal} players from NHL Stats API`);
 
-      // Get all active players from DB
+      // Get all active players from DB — team_abbrev needed for goalie composite
       const playersResult = await pool.query(`
-        SELECT id, nhl_id, position, name FROM players WHERE is_active = true
+        SELECT id, nhl_id, position, name, team_abbrev FROM players WHERE is_active = true
       `);
 
       let updated = 0;
@@ -187,7 +203,8 @@ class NHLApiService {
 
         if (player.position === 'goalie') {
           const stats = goalieStats[nhlId];
-          newCost = this.calculateGoalieCost(stats);
+          const ptsPct = teamPtsPct[player.team_abbrev] ?? null;
+          newCost = this.calculateGoalieCost(stats, ptsPct);
           if (stats) {
             regGp      = stats.gamesPlayed || 0;
             regWins    = stats.wins || 0;
@@ -242,6 +259,9 @@ class NHLApiService {
    * Calculate skater cost from regular-season stats on a $1–$4 scale.
    * Uses points-per-game with position-specific thresholds
    * (defensemen score fewer points than forwards at the same talent level).
+   *
+   * Forwards:  $4 ≥ 1.15 PPG | $3 = 0.80–1.14 | $2 = 0.50–0.79 | $1 < 0.50
+   * Defensemen: $4 ≥ 0.75 PPG | $3 = 0.50–0.74 | $2 = 0.30–0.49 | $1 < 0.30
    */
   calculateSkaterCost(stats, position) {
     if (!stats || !stats.gamesPlayed || stats.gamesPlayed < 5) {
@@ -251,37 +271,52 @@ class NHLApiService {
     const ppg = stats.points / stats.gamesPlayed;
 
     if (position === 'defense') {
-      // Defensive scoring is compressed — separate thresholds
       if (ppg >= 0.75) return 4; // Elite: Makar/Fox tier
-      if (ppg >= 0.45) return 3; // Solid offensive D
-      if (ppg >= 0.15) return 2; // Average / stay-at-home
+      if (ppg >= 0.50) return 3; // Solid offensive D
+      if (ppg >= 0.30) return 2; // Average / stay-at-home
       return 1;
     } else {
       // Forwards
-      if (ppg >= 0.95) return 4; // Elite: McDavid/Draisaitl/MacKinnon tier
-      if (ppg >= 0.60) return 3; // Strong top-6: Matthews/Barkov/Pastrnak tier
-      if (ppg >= 0.25) return 2; // Mid-tier and bottom-6
+      if (ppg >= 1.15) return 4; // Elite: McDavid/Draisaitl/MacKinnon tier
+      if (ppg >= 0.80) return 3; // Strong top-6: Matthews/Barkov/Pastrnak tier
+      if (ppg >= 0.50) return 2; // Mid-tier and bottom-6
       return 1;
     }
   }
 
   /**
    * Calculate goalie cost from regular-season stats on a $1–$4 scale.
-   * Save percentage is the most reliable measure of goalie quality.
-   * Games played threshold ensures we're evaluating real starters.
+   * Uses a composite score: (SV% × 0.6) + (team points% × 0.4)
+   * where team points% = team points / (games played × 2).
+   *
+   * Tier thresholds: $4 ≥ 0.760 | $3 = 0.730–0.759 | $2 = 0.700–0.729 | $1 < 0.700
+   *
+   * Falls back to SV%-only tiers if team standings data is unavailable.
+   *
+   * @param {object} stats          - Goalie row from NHL Stats API
+   * @param {number|null} teamPtsPct - Team's points percentage (pts / GP×2); null if unavailable
    */
-  calculateGoalieCost(stats) {
+  calculateGoalieCost(stats, teamPtsPct = null) {
     if (!stats || !stats.gamesPlayed || stats.gamesPlayed < 5) {
       return 2; // Unknown / rarely-used backup
     }
 
     // savePct field name varies slightly across NHL API versions
     const savePct = stats.savePct || stats.savePctg || 0;
-    const gp = stats.gamesPlayed;
 
-    if (savePct >= 0.920 && gp >= 20) return 4; // Elite starter: Hellebuyck/Shesterkin tier
-    if (savePct >= 0.908 && gp >= 15) return 3; // Strong starter
-    if (gp >= 10) return 2;                      // Backup / average starter with NHL experience
+    if (teamPtsPct !== null) {
+      // Composite score per spec
+      const composite = (savePct * 0.6) + (teamPtsPct * 0.4);
+      if (composite >= 0.760) return 4;
+      if (composite >= 0.730) return 3;
+      if (composite >= 0.700) return 2;
+      return 1;
+    }
+
+    // Fallback: SV%-only tiers when standings data is unavailable
+    if (savePct >= 0.920) return 4;
+    if (savePct >= 0.908) return 3;
+    if (savePct >= 0.880) return 2;
     return 1;
   }
 
