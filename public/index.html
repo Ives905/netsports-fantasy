@@ -1045,6 +1045,13 @@ function AppContent() {
   };
 
   const saveRoster = async () => {
+    const anySelected = ['western', 'eastern'].some(conf =>
+      ['forwards', 'defense', 'goalies'].some(pos => (currentRoster[conf]?.[pos]?.length || 0) > 0)
+    );
+    if (anySelected && (!stars.forward || !stars.defense || !stars.goalie)) {
+      setToast({ message: 'Select a star player for each position (F, D, G) before saving', type: 'error' });
+      return;
+    }
     try {
       await api.saveRoster(pickRound, currentRoster, stars, tiebreakers);
       setToast({ message: 'Roster saved!', type: 'success' });

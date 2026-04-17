@@ -104,6 +104,9 @@ router.put('/:round', authenticateToken, async (req, res) => {
     if (totalCost > SALARY_CAP) {
       return res.status(400).json({ error: 'Over salary cap' });
     }
+    if (!stars || !stars.forward || !stars.defense || !stars.goalie) {
+      return res.status(400).json({ error: 'A star player must be selected for each position (forward, defense, goalie)' });
+    }
     for (const player of playerData.rows) {
       const isStar = stars.forward === player.id || stars.defense === player.id || stars.goalie === player.id;
       await pool.query('INSERT INTO roster_players (roster_id, player_id, is_star) VALUES ($1, $2, $3)', [rosterId, player.id, isStar]);
