@@ -8,7 +8,8 @@
     "dev": "nodemon src/server.js",
     "migrate": "node migrations/run.js",
     "seed": "node src/seed.js",
-    "fetch-stats": "node src/jobs/fetchStats.js"
+    "fetch-stats": "node src/jobs/fetchStats.js",
+    "fetch-pickem": "node src/jobs/fetchPickemData.js"
   },
   "dependencies": {
     "express": "^4.18.2",

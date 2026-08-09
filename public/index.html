@@ -698,6 +698,7 @@ const MobileMenu = ({ isOpen, onClose, page, setPage, user, setAdminModal }) => 
             <button onClick={() => { setAdminModal(true); onClose(); }}
               className="w-full text-left px-4 py-3 rounded-lg font-bold uppercase text-amber-400 hover:bg-slate-700">Admin</button>
           )}
+          <a href="/pickem.html" className="block w-full text-left px-4 py-3 rounded-lg font-bold uppercase text-amber-400 hover:bg-slate-700">Saturday Pickem ↗</a>
         </nav>
       </div>
     </div>
@@ -1205,6 +1206,7 @@ function AppContent() {
             <button key={p} onClick={() => setPage(p)} className={`px-4 py-2 font-bold text-sm uppercase ${page === p ? 'bg-red-600 text-white' : 'text-gray-300 hover:bg-slate-700'} rounded-t-lg`}>{p}</button>
           ))}
           {user?.is_admin && <button onClick={() => setAdminModal(true)} className="px-4 py-2 font-bold text-sm uppercase text-amber-400 hover:bg-slate-700 rounded-t-lg">Admin</button>}
+          <a href="/pickem.html" className="px-4 py-2 font-bold text-sm uppercase text-amber-400 hover:bg-slate-700 rounded-t-lg">Saturday Pickem ↗</a>
         </div>
         <div className="flex items-center gap-2">
           {user ? (

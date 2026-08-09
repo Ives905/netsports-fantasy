@@ -1,0 +1,816 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Saturday Night Pickem - NetSports Fantasy</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <style>
+    body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .animate-spin { animation: spin 1s linear infinite; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="text/babel">
+const { useState, useEffect, useCallback, createContext, useContext } = React;
+
+const API_URL = '/api';
+
+// ─────────────────────────────────────────────────────────────
+// API client — reuses the same JWT token as the Draft Pool
+// (same localStorage key), so logging into either site logs
+// you into both.
+// ─────────────────────────────────────────────────────────────
+const api = {
+  token: localStorage.getItem('netsports-token'),
+  setToken(token) {
+    this.token = token;
+    if (token) localStorage.setItem('netsports-token', token);
+    else localStorage.removeItem('netsports-token');
+  },
+  async request(endpoint, options = {}) {
+    const headers = { 'Content-Type': 'application/json', ...options.headers };
+    if (this.token) headers['Authorization'] = `Bearer ${this.token}`;
+    const response = await fetch(`${API_URL}${endpoint}`, { ...options, headers });
+    const contentType = response.headers.get('content-type') || '';
+    if (!contentType.includes('application/json')) {
+      throw new Error(`Server returned non-JSON response for ${endpoint} (status ${response.status})`);
+    }
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || 'Request failed');
+    return data;
+  },
+  async login(username, password) {
+    const data = await this.request('/auth/login', { method: 'POST', body: JSON.stringify({ username, password }) });
+    if (data.token) this.setToken(data.token);
+    return data;
+  },
+  async register(username, email, password) {
+    const data = await this.request('/auth/register', { method: 'POST', body: JSON.stringify({ username, email, password }) });
+    if (data.token) this.setToken(data.token);
+    return data;
+  },
+  async getMe() { return this.request('/auth/me'); },
+  logout() { this.setToken(null); },
+
+  async getCurrentWeek() { return this.request('/pickem/weeks/current'); },
+  async getWeek(id) { return this.request(`/pickem/weeks/${id}`); },
+  async getWeeks() { return this.request('/pickem/weeks'); },
+  async submitPick(gameId, pickedTeam) {
+    return this.request(`/pickem/games/${gameId}/pick`, { method: 'POST', body: JSON.stringify({ pickedTeam }) });
+  },
+  async submitTiebreaker(weekId, guessedTotalGoals) {
+    return this.request(`/pickem/weeks/${weekId}/tiebreaker`, { method: 'POST', body: JSON.stringify({ guessedTotalGoals }) });
+  },
+
+  async getGroups() { return this.request('/pickem/groups'); },
+  async getPublicGroups() { return this.request('/pickem/groups/public'); },
+  async createGroup(name, description, isPrivate) {
+    return this.request('/pickem/groups', { method: 'POST', body: JSON.stringify({ name, description, isPrivate }) });
+  },
+  async joinGroupByCode(code) { return this.request('/pickem/groups/join', { method: 'POST', body: JSON.stringify({ code }) }); },
+  async joinPublicGroup(id) { return this.request(`/pickem/groups/${id}/join`, { method: 'POST' }); },
+  async leaveGroup(id) { return this.request(`/pickem/groups/${id}/leave`, { method: 'POST' }); },
+  async deleteGroup(id) { return this.request(`/pickem/groups/${id}`, { method: 'DELETE' }); },
+  async getGroup(id) { return this.request(`/pickem/groups/${id}`); },
+  async getGroupWeek(groupId, weekId) { return this.request(`/pickem/groups/${groupId}/weeks/${weekId}`); },
+  async getGroupSeasonStandings(groupId) { return this.request(`/pickem/groups/${groupId}/standings/season`); },
+
+  async getGlobalStandings() { return this.request('/pickem/standings'); },
+
+  async adminSync(date) { return this.request('/pickem/admin/sync', { method: 'POST', body: JSON.stringify({ date }) }); },
+  async adminUpdateGame(gameId, body) { return this.request(`/pickem/admin/games/${gameId}`, { method: 'PATCH', body: JSON.stringify(body) }); }
+};
+
+// ─────────────────────────────────────────────────────────────
+// Auth
+// ─────────────────────────────────────────────────────────────
+const AuthContext = createContext(null);
+
+function AuthProvider({ children }) {
+  const [user, setUser] = useState(null);
+  const [loading, setLoading] = useState(true);
+  useEffect(() => {
+    if (api.token) {
+      api.getMe().then(data => setUser(data.user)).catch(() => api.logout()).finally(() => setLoading(false));
+    } else {
+      setLoading(false);
+    }
+  }, []);
+  const login = async (username, password) => { const data = await api.login(username, password); setUser(data.user); return data; };
+  const register = async (username, email, password) => { const data = await api.register(username, email, password); setUser(data.user); return data; };
+  const logout = () => { api.logout(); setUser(null); };
+  return <AuthContext.Provider value={{ user, setUser, login, register, logout, loading }}>{children}</AuthContext.Provider>;
+}
+const useAuth = () => useContext(AuthContext);
+const isAdmin = (user) => !!(user && (user.isAdmin || user.is_admin));
+
+// ─────────────────────────────────────────────────────────────
+// Shared UI bits (same visual language as the Draft Pool)
+// ─────────────────────────────────────────────────────────────
+const Toast = ({ message, type, onClose }) => {
+  useEffect(() => { const t = setTimeout(onClose, 3000); return () => clearTimeout(t); }, [onClose]);
+  return <div className={`fixed bottom-4 right-4 px-6 py-3 rounded-lg shadow-lg z-50 text-white font-medium ${type === 'success' ? 'bg-emerald-600' : 'bg-red-600'}`}>{message}</div>;
+};
+
+const Modal = ({ isOpen, onClose, title, children }) => {
+  if (!isOpen) return null;
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-black/70" onClick={onClose} />
+      <div className="relative bg-slate-800 rounded-2xl shadow-2xl max-w-md w-full max-h-[90vh] overflow-hidden">
+        <div className="flex items-center justify-between p-4 border-b border-slate-700">
+          <h3 className="text-xl font-bold text-white">{title}</h3>
+          <button onClick={onClose} className="text-gray-400 hover:text-white text-2xl">&times;</button>
+        </div>
+        <div className="p-4 overflow-y-auto max-h-[calc(90vh-80px)]">{children}</div>
+      </div>
+    </div>
+  );
+};
+
+const LoadingSpinner = () => (
+  <div className="flex items-center justify-center p-8">
+    <div className="w-8 h-8 border-4 border-red-600 border-t-transparent rounded-full animate-spin"></div>
+  </div>
+);
+
+const TeamLogo = ({ abbrev, className }) => (
+  <img
+    src={`https://assets.nhle.com/logos/nhl/svg/${abbrev}_light.svg`}
+    alt={abbrev}
+    className={className || 'w-10 h-10 object-contain'}
+    onError={(e) => { e.target.style.visibility = 'hidden'; }}
+  />
+);
+
+function formatGameTime(iso) {
+  return new Date(iso).toLocaleTimeString('en-US', { timeZone: 'America/Toronto', hour: 'numeric', minute: '2-digit' }) + ' ET';
+}
+function formatGameDate(iso) {
+  return new Date(iso).toLocaleDateString('en-US', { timeZone: 'America/Toronto', weekday: 'long', month: 'long', day: 'numeric' });
+}
+
+// ─────────────────────────────────────────────────────────────
+// Auth modal (login / register)
+// ─────────────────────────────────────────────────────────────
+const AuthModal = ({ state, onClose, showToast }) => {
+  const { login, register } = useAuth();
+  const [mode, setMode] = useState(state.mode || 'login');
+  const [form, setForm] = useState({ username: '', email: '', password: '' });
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+
+  useEffect(() => { setMode(state.mode || 'login'); setError(''); }, [state]);
+
+  const submit = async (e) => {
+    e.preventDefault();
+    setBusy(true); setError('');
+    try {
+      if (mode === 'login') await login(form.username, form.password);
+      else await register(form.username, form.email, form.password);
+      showToast(mode === 'login' ? 'Welcome back!' : 'Account created!', 'success');
+      onClose();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Modal isOpen={state.open} onClose={onClose} title={mode === 'login' ? 'Sign In' : 'Create Account'}>
+      <form onSubmit={submit} className="space-y-3">
+        <input placeholder="Username" value={form.username} onChange={e => setForm({ ...form, username: e.target.value })}
+          className="w-full bg-slate-700 text-white rounded-lg px-3 py-2" required />
+        {mode === 'register' && (
+          <input placeholder="Email" type="email" value={form.email} onChange={e => setForm({ ...form, email: e.target.value })}
+            className="w-full bg-slate-700 text-white rounded-lg px-3 py-2" required />
+        )}
+        <input placeholder="Password" type="password" value={form.password} onChange={e => setForm({ ...form, password: e.target.value })}
+          className="w-full bg-slate-700 text-white rounded-lg px-3 py-2" required />
+        {error && <div className="text-red-400 text-sm">{error}</div>}
+        <button disabled={busy} className="w-full bg-red-600 hover:bg-red-500 text-white py-2 rounded-lg font-bold disabled:opacity-50">
+          {busy ? '...' : mode === 'login' ? 'Sign In' : 'Create Account'}
+        </button>
+        <button type="button" onClick={() => setMode(mode === 'login' ? 'register' : 'login')} className="w-full text-gray-400 text-sm hover:text-white">
+          {mode === 'login' ? "Need an account? Sign up" : 'Already have an account? Sign in'}
+        </button>
+      </form>
+    </Modal>
+  );
+};
+
+// ─────────────────────────────────────────────────────────────
+// Picks page
+// ─────────────────────────────────────────────────────────────
+const GameCard = ({ game, onPick, picking }) => {
+  const isFinal = game.status === 'final';
+  const isPostponed = game.status === 'postponed';
+  const myPick = game.myPick;
+
+  return (
+    <div className={`bg-slate-800 rounded-xl p-4 ${isPostponed ? 'opacity-50' : ''}`}>
+      <div className="flex items-center justify-between mb-3">
+        <span className="text-gray-400 text-sm">{formatGameTime(game.start_time)}</span>
+        <div className="flex items-center gap-2">
+          {game.is_tiebreaker_game && <span className="bg-amber-600 text-white text-xs font-bold px-2 py-1 rounded">TIEBREAKER GAME</span>}
+          {isPostponed && <span className="bg-slate-600 text-white text-xs font-bold px-2 py-1 rounded">POSTPONED</span>}
+          {!isPostponed && (game.locked ? <span className="bg-slate-700 text-gray-300 text-xs font-bold px-2 py-1 rounded">🔒 LOCKED</span>
+            : <span className="bg-emerald-700 text-white text-xs font-bold px-2 py-1 rounded">OPEN</span>)}
+        </div>
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        {[game.away_team, game.home_team].map(team => {
+          const picked = myPick === team;
+          const won = isFinal && game.winner === team;
+          const lost = isFinal && game.winner && game.winner !== team;
+          return (
+            <button
+              key={team}
+              disabled={game.locked || isPostponed || picking}
+              onClick={() => onPick(game.id, team)}
+              className={`flex flex-col items-center gap-2 rounded-xl p-3 border-2 transition
+                ${picked ? 'border-red-500 bg-red-900/30' : 'border-slate-700 bg-slate-700/40'}
+                ${won ? 'border-emerald-500 bg-emerald-900/30' : ''}
+                ${lost && picked ? 'border-red-500 bg-red-900/50' : ''}
+                ${game.locked || isPostponed ? 'cursor-default' : 'hover:border-slate-500 cursor-pointer'}`}
+            >
+              <TeamLogo abbrev={team} className="w-12 h-12 object-contain" />
+              <span className="text-white font-bold text-sm">{team}</span>
+              {isFinal && (
+                <span className="text-gray-300 text-xs">
+                  {team === game.home_team ? game.home_score : game.away_score}
+                </span>
+              )}
+              {picked && <span className="text-xs font-bold text-red-300">YOUR PICK</span>}
+            </button>
+          );
+        })}
+      </div>
+      {isFinal && game.myPick && (
+        <div className={`mt-2 text-center text-sm font-bold ${game.myPickCorrect ? 'text-emerald-400' : 'text-red-400'}`}>
+          {game.myPickCorrect ? '✓ Correct pick' : '✗ Missed this one'}
+        </div>
+      )}
+    </div>
+  );
+};
+
+const TiebreakerCard = ({ game, myTiebreaker, onSubmit }) => {
+  const [guess, setGuess] = useState(myTiebreaker?.guessed_total_goals ?? '');
+  const [busy, setBusy] = useState(false);
+  if (!game) return null;
+
+  const submit = async () => {
+    if (guess === '' || Number(guess) < 0) return;
+    setBusy(true);
+    try { await onSubmit(Number(guess)); } finally { setBusy(false); }
+  };
+
+  return (
+    <div className="bg-amber-900/20 border border-amber-600/40 rounded-xl p-4 mt-4">
+      <h3 className="text-amber-300 font-bold mb-1">Tiebreaker: Total Goals</h3>
+      <p className="text-gray-300 text-sm mb-3">
+        Guess the combined final score (both teams) of the last game of the night — {game.away_team} @ {game.home_team}, {formatGameTime(game.start_time)}.
+        Used to break ties on the weekly leaderboard.
+      </p>
+      <div className="flex gap-2">
+        <input type="number" min="0" value={guess} disabled={game.locked}
+          onChange={e => setGuess(e.target.value)}
+          className="bg-slate-700 text-white rounded-lg px-3 py-2 w-24 disabled:opacity-50" />
+        <button disabled={game.locked || busy} onClick={submit}
+          className="bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-white px-4 py-2 rounded-lg font-bold">
+          {game.locked ? 'Locked' : busy ? 'Saving...' : 'Save Guess'}
+        </button>
+      </div>
+      {game.status === 'final' && (
+        <div className="text-gray-300 text-sm mt-2">Actual total: <span className="font-bold text-white">{(game.home_score ?? 0) + (game.away_score ?? 0)}</span></div>
+      )}
+    </div>
+  );
+};
+
+const PicksPage = ({ showToast }) => {
+  const { user } = useAuth();
+  const [weeks, setWeeks] = useState([]);
+  const [weekId, setWeekId] = useState(null);
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  const loadWeek = useCallback(async (id) => {
+    setLoading(true);
+    try {
+      const result = id ? await api.getWeek(id) : await api.getCurrentWeek();
+      setData(result);
+      setWeekId(result.week?.id ?? null);
+    } catch (err) {
+      showToast(err.message, 'error');
+    } finally {
+      setLoading(false);
+    }
+  }, [showToast]);
+
+  useEffect(() => {
+    api.getWeeks().then(r => setWeeks(r.weeks)).catch(() => {});
+    loadWeek(null);
+  }, [loadWeek]);
+
+  const handlePick = async (gameId, team) => {
+    if (!user) { showToast('Sign in to make picks', 'error'); return; }
+    try {
+      await api.submitPick(gameId, team);
+      await loadWeek(weekId);
+      showToast('Pick saved', 'success');
+    } catch (err) {
+      showToast(err.message, 'error');
+    }
+  };
+
+  const handleTiebreaker = async (goals) => {
+    try {
+      await api.submitTiebreaker(weekId, goals);
+      await loadWeek(weekId);
+      showToast('Tiebreaker saved', 'success');
+    } catch (err) {
+      showToast(err.message, 'error');
+    }
+  };
+
+  if (loading) return <LoadingSpinner />;
+  if (!data || !data.week) {
+    return <div className="text-center text-gray-400 py-12">No Saturday games loaded yet. Check back closer to game night!</div>;
+  }
+
+  const tiebreakerGame = data.games.find(g => g.is_tiebreaker_game);
+
+  return (
+    <div className="max-w-3xl mx-auto px-4 py-8">
+      <div className="flex flex-wrap items-center justify-between gap-3 mb-6">
+        <h2 className="text-2xl font-black text-white">{formatGameDate(data.week.week_date + 'T18:00:00')}</h2>
+        {weeks.length > 1 && (
+          <select value={weekId || ''} onChange={e => loadWeek(e.target.value)} className="bg-slate-700 text-white rounded-lg px-3 py-2">
+            {weeks.map(w => <option key={w.id} value={w.id}>{w.week_date}{w.is_finalized ? ' (final)' : ''}</option>)}
+          </select>
+        )}
+      </div>
+      {!user && <div className="bg-blue-900/40 border border-blue-500/30 rounded-xl p-4 mb-4 text-gray-200">Sign in to make your picks.</div>}
+      <div className="space-y-4">
+        {data.games.map(g => <GameCard key={g.id} game={g} onPick={handlePick} />)}
+      </div>
+      {user && <TiebreakerCard game={tiebreakerGame} myTiebreaker={data.myTiebreaker} onSubmit={handleTiebreaker} />}
+    </div>
+  );
+};
+
+// ─────────────────────────────────────────────────────────────
+// Groups
+// ─────────────────────────────────────────────────────────────
+const CreateGroupModal = ({ isOpen, onClose, onCreated, showToast }) => {
+  const [name, setName] = useState('');
+  const [description, setDescription] = useState('');
+  const [isPrivate, setIsPrivate] = useState(true);
+  const [busy, setBusy] = useState(false);
+
+  const submit = async (e) => {
+    e.preventDefault();
+    setBusy(true);
+    try {
+      const { group } = await api.createGroup(name, description, isPrivate);
+      showToast(`Group created! Invite code: ${group.code}`, 'success');
+      setName(''); setDescription('');
+      onCreated();
+      onClose();
+    } catch (err) {
+      showToast(err.message, 'error');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Modal isOpen={isOpen} onClose={onClose} title="Create a Group">
+      <form onSubmit={submit} className="space-y-3">
+        <input placeholder="Group name" value={name} onChange={e => setName(e.target.value)}
+          className="w-full bg-slate-700 text-white rounded-lg px-3 py-2" required />
+        <textarea placeholder="Description (optional)" value={description} onChange={e => setDescription(e.target.value)}
+          className="w-full bg-slate-700 text-white rounded-lg px-3 py-2" rows="2" />
+        <label className="flex items-center gap-2 text-gray-300">
+          <input type="checkbox" checked={isPrivate} onChange={e => setIsPrivate(e.target.checked)} />
+          Private (invite code only)
+        </label>
+        <button disabled={busy} className="w-full bg-red-600 hover:bg-red-500 text-white py-2 rounded-lg font-bold disabled:opacity-50">
+          {busy ? 'Creating...' : 'Create Group'}
+        </button>
+      </form>
+    </Modal>
+  );
+};
+
+const GroupsPage = ({ showToast, openGroup }) => {
+  const [myGroups, setMyGroups] = useState([]);
+  const [publicGroups, setPublicGroups] = useState([]);
+  const [code, setCode] = useState('');
+  const [createOpen, setCreateOpen] = useState(false);
+  const [loading, setLoading] = useState(true);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const [mine, pub] = await Promise.all([api.getGroups(), api.getPublicGroups()]);
+      setMyGroups(mine.groups);
+      setPublicGroups(pub.groups);
+    } catch (err) {
+      showToast(err.message, 'error');
+    } finally {
+      setLoading(false);
+    }
+  }, [showToast]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const joinByCode = async (e) => {
+    e.preventDefault();
+    try {
+      await api.joinGroupByCode(code);
+      setCode('');
+      showToast('Joined group!', 'success');
+      load();
+    } catch (err) {
+      showToast(err.message, 'error');
+    }
+  };
+
+  const joinPublic = async (id) => {
+    try {
+      await api.joinPublicGroup(id);
+      showToast('Joined group!', 'success');
+      load();
+    } catch (err) {
+      showToast(err.message, 'error');
+    }
+  };
+
+  if (loading) return <LoadingSpinner />;
+
+  return (
+    <div className="max-w-3xl mx-auto px-4 py-8">
+      <div className="flex items-center justify-between mb-6">
+        <h2 className="text-2xl font-black text-white">My Groups</h2>
+        <button onClick={() => setCreateOpen(true)} className="bg-red-600 hover:bg-red-500 text-white px-4 py-2 rounded-lg font-bold">+ Create Group</button>
+      </div>
+
+      <form onSubmit={joinByCode} className="flex gap-2 mb-6">
+        <input placeholder="Have an invite code?" value={code} onChange={e => setCode(e.target.value.toUpperCase())}
+          className="flex-1 bg-slate-700 text-white rounded-lg px-3 py-2" />
+        <button className="bg-slate-600 hover:bg-slate-500 text-white px-4 py-2 rounded-lg font-bold">Join</button>
+      </form>
+
+      <div className="space-y-3 mb-8">
+        {myGroups.length === 0 && <div className="text-gray-400">You haven't joined a group yet.</div>}
+        {myGroups.map(g => (
+          <button key={g.id} onClick={() => openGroup(g.id)} className="w-full text-left bg-slate-800 hover:bg-slate-700 rounded-xl p-4 flex items-center justify-between">
+            <div>
+              <div className="text-white font-bold">{g.name}</div>
+              <div className="text-gray-400 text-sm">{g.member_count} members · owned by {g.owner_username} · code {g.code}</div>
+            </div>
+            <span className="text-gray-500">→</span>
+          </button>
+        ))}
+      </div>
+
+      <h3 className="text-lg font-bold text-white mb-3">Browse Public Groups</h3>
+      <div className="space-y-3">
+        {publicGroups.length === 0 && <div className="text-gray-400">No public groups yet.</div>}
+        {publicGroups.map(g => (
+          <div key={g.id} className="bg-slate-800 rounded-xl p-4 flex items-center justify-between">
+            <div>
+              <div className="text-white font-bold">{g.name}</div>
+              <div className="text-gray-400 text-sm">{g.member_count} members · owned by {g.owner_username}</div>
+            </div>
+            <button onClick={() => joinPublic(g.id)} className="bg-blue-600 hover:bg-blue-500 text-white px-3 py-2 rounded-lg font-bold text-sm">Join</button>
+          </div>
+        ))}
+      </div>
+
+      <CreateGroupModal isOpen={createOpen} onClose={() => setCreateOpen(false)} onCreated={load} showToast={showToast} />
+    </div>
+  );
+};
+
+const GroupDetailPage = ({ groupId, showToast, onBack }) => {
+  const { user } = useAuth();
+  const [group, setGroup] = useState(null);
+  const [members, setMembers] = useState([]);
+  const [weeks, setWeeks] = useState([]);
+  const [weekId, setWeekId] = useState(null);
+  const [weekData, setWeekData] = useState(null);
+  const [seasonStandings, setSeasonStandings] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const [g, w, s] = await Promise.all([api.getGroup(groupId), api.getWeeks(), api.getGroupSeasonStandings(groupId)]);
+        setGroup(g.group); setMembers(g.members); setWeeks(w.weeks); setSeasonStandings(s.standings);
+        const current = w.weeks.find(wk => new Date(wk.week_date) <= new Date()) || w.weeks[0];
+        if (current) setWeekId(current.id);
+      } catch (err) {
+        showToast(err.message, 'error');
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, [groupId]);
+
+  useEffect(() => {
+    if (!weekId) return;
+    api.getGroupWeek(groupId, weekId).then(setWeekData).catch(err => showToast(err.message, 'error'));
+  }, [groupId, weekId]);
+
+  const deleteGroup = async () => {
+    if (!confirm(`Delete "${group.name}"? This can't be undone.`)) return;
+    try { await api.deleteGroup(groupId); showToast('Group deleted', 'success'); onBack(); }
+    catch (err) { showToast(err.message, 'error'); }
+  };
+
+  if (loading || !group) return <LoadingSpinner />;
+
+  return (
+    <div className="max-w-3xl mx-auto px-4 py-8">
+      <button onClick={onBack} className="text-gray-400 hover:text-white mb-4">← Back to Groups</button>
+      <div className="flex items-start justify-between mb-2">
+        <div>
+          <h2 className="text-2xl font-black text-white">{group.name}</h2>
+          <div className="text-gray-400 text-sm">Invite code: <span className="font-mono text-amber-400">{group.code}</span> · {members.length} members</div>
+        </div>
+        {user?.id === group.owner_id && (
+          <button onClick={deleteGroup} className="text-red-400 hover:text-red-300 text-sm">Delete Group</button>
+        )}
+      </div>
+
+      <h3 className="text-lg font-bold text-white mt-6 mb-2">Season Standings</h3>
+      <div className="bg-slate-800 rounded-xl overflow-hidden mb-8">
+        <table className="w-full text-left">
+          <thead className="bg-slate-700 text-gray-300 text-sm">
+            <tr><th className="p-3">#</th><th className="p-3">Player</th><th className="p-3">Correct Picks</th></tr>
+          </thead>
+          <tbody>
+            {seasonStandings.map((s, i) => (
+              <tr key={s.user_id} className="border-t border-slate-700 text-white">
+                <td className="p-3">{i + 1}</td><td className="p-3">{s.username}</td><td className="p-3 font-bold">{s.total_correct}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="flex items-center justify-between mb-2">
+        <h3 className="text-lg font-bold text-white">Weekly Standings</h3>
+        {weeks.length > 1 && (
+          <select value={weekId || ''} onChange={e => setWeekId(Number(e.target.value))} className="bg-slate-700 text-white rounded-lg px-3 py-2">
+            {weeks.map(w => <option key={w.id} value={w.id}>{w.week_date}{w.is_finalized ? ' (final)' : ''}</option>)}
+          </select>
+        )}
+      </div>
+      {weekData && (
+        <>
+          <div className="bg-slate-800 rounded-xl overflow-hidden mb-6">
+            <table className="w-full text-left">
+              <thead className="bg-slate-700 text-gray-300 text-sm">
+                <tr><th className="p-3">#</th><th className="p-3">Player</th><th className="p-3">Correct</th><th className="p-3">Tiebreaker Guess</th></tr>
+              </thead>
+              <tbody>
+                {weekData.standings.map((s, i) => (
+                  <tr key={s.user_id} className="border-t border-slate-700 text-white">
+                    <td className="p-3">{i + 1}</td><td className="p-3">{s.username}</td>
+                    <td className="p-3 font-bold">{s.correct_picks}</td>
+                    <td className="p-3 text-gray-400">
+                      {s.guessed_total_goals ?? '—'}{s.actual_total_goals != null ? ` (actual: ${s.actual_total_goals})` : ''}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          <h4 className="text-white font-bold mb-2">Who Picked What</h4>
+          <div className="space-y-3">
+            {weekData.games.map(g => (
+              <div key={g.id} className="bg-slate-800 rounded-xl p-4">
+                <div className="text-gray-300 text-sm mb-2">{g.away_team} @ {g.home_team} — {formatGameTime(g.start_time)}</div>
+                {!g.locked ? (
+                  <div className="text-gray-500 text-sm">Picks reveal once this game locks.</div>
+                ) : g.picks.length === 0 ? (
+                  <div className="text-gray-500 text-sm">No one in this group picked this game.</div>
+                ) : (
+                  <div className="flex flex-wrap gap-2">
+                    {g.picks.map(p => (
+                      <span key={p.username} className={`text-xs font-bold px-2 py-1 rounded ${p.is_correct === true ? 'bg-emerald-700 text-white' : p.is_correct === false ? 'bg-red-900 text-red-200' : 'bg-slate-700 text-gray-200'}`}>
+                        {p.username}: {p.picked_team}
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+};
+
+// ─────────────────────────────────────────────────────────────
+// Global standings
+// ─────────────────────────────────────────────────────────────
+const StandingsPage = ({ showToast }) => {
+  const [standings, setStandings] = useState([]);
+  const [loading, setLoading] = useState(true);
+  useEffect(() => {
+    api.getGlobalStandings().then(r => setStandings(r.standings)).catch(err => showToast(err.message, 'error')).finally(() => setLoading(false));
+  }, []);
+  if (loading) return <LoadingSpinner />;
+  return (
+    <div className="max-w-3xl mx-auto px-4 py-8">
+      <h2 className="text-2xl font-black text-white mb-6">Season Standings — All Players</h2>
+      <div className="bg-slate-800 rounded-xl overflow-hidden">
+        <table className="w-full text-left">
+          <thead className="bg-slate-700 text-gray-300 text-sm">
+            <tr><th className="p-3">#</th><th className="p-3">Player</th><th className="p-3">Correct Picks</th></tr>
+          </thead>
+          <tbody>
+            {standings.map((s, i) => (
+              <tr key={s.user_id} className="border-t border-slate-700 text-white">
+                <td className="p-3">{i + 1}</td><td className="p-3">{s.username}</td><td className="p-3 font-bold">{s.total_correct}</td>
+              </tr>
+            ))}
+            {standings.length === 0 && <tr><td colSpan="3" className="p-6 text-center text-gray-400">No picks graded yet.</td></tr>}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+};
+
+// ─────────────────────────────────────────────────────────────
+// Admin
+// ─────────────────────────────────────────────────────────────
+const AdminPage = ({ showToast }) => {
+  const [data, setData] = useState(null);
+  const [syncDate, setSyncDate] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  const load = useCallback(async () => {
+    try { setData(await api.getCurrentWeek()); } catch (err) { showToast(err.message, 'error'); }
+  }, [showToast]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const sync = async () => {
+    setBusy(true);
+    try {
+      const result = await api.adminSync(syncDate || undefined);
+      showToast(`Synced ${result.gameCount || 0} games`, 'success');
+      load();
+    } catch (err) {
+      showToast(err.message, 'error');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const overrideGame = async (gameId, body) => {
+    try {
+      await api.adminUpdateGame(gameId, body);
+      showToast('Game updated', 'success');
+      load();
+    } catch (err) {
+      showToast(err.message, 'error');
+    }
+  };
+
+  return (
+    <div className="max-w-3xl mx-auto px-4 py-8">
+      <h2 className="text-2xl font-black text-white mb-6">Pickem Admin</h2>
+
+      <div className="bg-slate-800 rounded-xl p-4 mb-6">
+        <h3 className="text-white font-bold mb-2">Sync NHL Schedule/Scores</h3>
+        <p className="text-gray-400 text-sm mb-3">Pulls games for a Saturday from the NHL API. Leave the date blank to sync the next upcoming Saturday.</p>
+        <div className="flex gap-2">
+          <input type="date" value={syncDate} onChange={e => setSyncDate(e.target.value)} className="bg-slate-700 text-white rounded-lg px-3 py-2" />
+          <button disabled={busy} onClick={sync} className="bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white px-4 py-2 rounded-lg font-bold">
+            {busy ? 'Syncing...' : 'Sync Now'}
+          </button>
+        </div>
+      </div>
+
+      {data?.week && (
+        <div className="space-y-3">
+          <h3 className="text-white font-bold">{data.week.week_date} — Games</h3>
+          {data.games.map(g => (
+            <div key={g.id} className="bg-slate-800 rounded-xl p-4">
+              <div className="text-gray-300 text-sm mb-2">{g.away_team} @ {g.home_team} — {formatGameTime(g.start_time)} {g.is_tiebreaker_game && '(tiebreaker game)'}</div>
+              <div className="flex flex-wrap items-center gap-2">
+                <select defaultValue={g.status} onChange={e => overrideGame(g.id, { status: e.target.value })} className="bg-slate-700 text-white rounded-lg px-2 py-1 text-sm">
+                  {['scheduled', 'live', 'final', 'postponed'].map(s => <option key={s} value={s}>{s}</option>)}
+                </select>
+                <input type="number" placeholder="Away score" defaultValue={g.away_score ?? ''} onBlur={e => overrideGame(g.id, { awayScore: e.target.value === '' ? null : Number(e.target.value) })}
+                  className="bg-slate-700 text-white rounded-lg px-2 py-1 text-sm w-28" />
+                <input type="number" placeholder="Home score" defaultValue={g.home_score ?? ''} onBlur={e => overrideGame(g.id, { homeScore: e.target.value === '' ? null : Number(e.target.value) })}
+                  className="bg-slate-700 text-white rounded-lg px-2 py-1 text-sm w-28" />
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
+// ─────────────────────────────────────────────────────────────
+// App shell
+// ─────────────────────────────────────────────────────────────
+function AppContent() {
+  const { user, loading, logout } = useAuth();
+  const [page, setPage] = useState('picks');
+  const [activeGroupId, setActiveGroupId] = useState(null);
+  const [authModal, setAuthModal] = useState({ open: false, mode: 'login' });
+  const [toast, setToast] = useState(null);
+
+  const showToast = (message, type = 'success') => setToast({ message, type });
+
+  const navItems = ['picks', 'groups', 'standings'];
+  if (isAdmin(user)) navItems.push('admin');
+
+  if (loading) return <LoadingSpinner />;
+
+  return (
+    <div className="min-h-screen bg-slate-950">
+      <nav className="bg-slate-900 border-b-4 border-red-600 sticky top-0 z-40">
+        <div className="max-w-5xl mx-auto px-4 flex items-center justify-between h-16">
+          <div className="flex items-center gap-2 cursor-pointer" onClick={() => setPage('picks')}>
+            <span className="text-3xl">🏒</span>
+            <span className="text-white font-black text-lg leading-tight">
+              SATURDAY NIGHT<br /><span className="text-red-500 text-sm">PICKEM</span>
+            </span>
+          </div>
+          <div className="hidden md:flex gap-1">
+            {navItems.map(p => (
+              <button key={p} onClick={() => { setPage(p); setActiveGroupId(null); }}
+                className={`px-4 py-2 font-bold text-sm uppercase ${page === p ? 'bg-red-600 text-white' : 'text-gray-300 hover:bg-slate-700'} rounded-t-lg`}>
+                {p}
+              </button>
+            ))}
+            <a href="/" className="px-4 py-2 font-bold text-sm uppercase text-amber-400 hover:bg-slate-700 rounded-t-lg">Draft Pool ↗</a>
+          </div>
+          <div className="flex items-center gap-3">
+            {user ? (
+              <>
+                <span className="text-white font-semibold hidden sm:block">{user.username}</span>
+                <button onClick={logout} className="text-gray-400 hover:text-white text-sm">Logout</button>
+              </>
+            ) : (
+              <>
+                <button onClick={() => setAuthModal({ open: true, mode: 'login' })} className="bg-slate-700 text-white px-4 py-2 rounded-lg font-bold text-sm">Sign In</button>
+                <button onClick={() => setAuthModal({ open: true, mode: 'register' })} className="bg-red-600 text-white px-4 py-2 rounded-lg font-bold text-sm hidden sm:block">Sign Up</button>
+              </>
+            )}
+          </div>
+        </div>
+        <div className="md:hidden flex overflow-x-auto px-2 pb-2 gap-1">
+          {navItems.map(p => (
+            <button key={p} onClick={() => { setPage(p); setActiveGroupId(null); }}
+              className={`px-3 py-1.5 whitespace-nowrap font-bold text-xs uppercase rounded-lg ${page === p ? 'bg-red-600 text-white' : 'text-gray-300 bg-slate-800'}`}>
+              {p}
+            </button>
+          ))}
+          <a href="/" className="px-3 py-1.5 whitespace-nowrap font-bold text-xs uppercase rounded-lg text-amber-400 bg-slate-800">Draft Pool ↗</a>
+        </div>
+      </nav>
+
+      {page === 'picks' && <PicksPage showToast={showToast} />}
+      {page === 'groups' && !activeGroupId && <GroupsPage showToast={showToast} openGroup={setActiveGroupId} />}
+      {page === 'groups' && activeGroupId && <GroupDetailPage groupId={activeGroupId} showToast={showToast} onBack={() => setActiveGroupId(null)} />}
+      {page === 'standings' && <StandingsPage showToast={showToast} />}
+      {page === 'admin' && isAdmin(user) && <AdminPage showToast={showToast} />}
+
+      <AuthModal state={authModal} onClose={() => setAuthModal({ open: false })} showToast={showToast} />
+      {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
+    </div>
+  );
+}
+
+function App() {
+  return <AuthProvider><AppContent /></AuthProvider>;
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+  </script>
+</body>
+</html>
