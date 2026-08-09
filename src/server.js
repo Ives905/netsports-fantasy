@@ -50,6 +50,111 @@ async function runSchemaMigrations() {
   await runMigration('tiebreakers_round_check_drop',    `ALTER TABLE tiebreakers DROP CONSTRAINT IF EXISTS tiebreakers_round_check`);
   await runMigration('tiebreakers_round_check_add',     `ALTER TABLE tiebreakers ADD CONSTRAINT tiebreakers_round_check CHECK (round >= 0 AND round <= 3)`);
 
+
+  // ===== Saturday Night Pickem pool (new, additive only) =====
+  await runMigration('pickem_weeks_table', `
+    CREATE TABLE IF NOT EXISTS pickem_weeks (
+      id SERIAL PRIMARY KEY,
+      week_date DATE UNIQUE NOT NULL,
+      season VARCHAR(9) NOT NULL,
+      tiebreaker_game_id INT,
+      is_finalized BOOLEAN DEFAULT FALSE,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+
+  await runMigration('pickem_games_table', `
+    CREATE TABLE IF NOT EXISTS pickem_games (
+      id SERIAL PRIMARY KEY,
+      week_id INT REFERENCES pickem_weeks(id) ON DELETE CASCADE,
+      nhl_game_id BIGINT UNIQUE NOT NULL,
+      home_team VARCHAR(3) NOT NULL,
+      away_team VARCHAR(3) NOT NULL,
+      start_time TIMESTAMPTZ NOT NULL,
+      status VARCHAR(20) DEFAULT 'scheduled',
+      home_score INT,
+      away_score INT,
+      winner VARCHAR(3),
+      is_tiebreaker_game BOOLEAN DEFAULT FALSE,
+      graded_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+  await runMigration('pickem_games_week_idx',  `CREATE INDEX IF NOT EXISTS idx_pickem_games_week ON pickem_games(week_id)`);
+  await runMigration('pickem_games_start_idx', `CREATE INDEX IF NOT EXISTS idx_pickem_games_start ON pickem_games(start_time)`);
+
+  await runMigration('pickem_weeks_tiebreaker_fk_drop', `ALTER TABLE pickem_weeks DROP CONSTRAINT IF EXISTS fk_pickem_weeks_tiebreaker_game`);
+  await runMigration('pickem_weeks_tiebreaker_fk_add',  `ALTER TABLE pickem_weeks ADD CONSTRAINT fk_pickem_weeks_tiebreaker_game FOREIGN KEY (tiebreaker_game_id) REFERENCES pickem_games(id)`);
+
+  await runMigration('pickem_picks_table', `
+    CREATE TABLE IF NOT EXISTS pickem_picks (
+      id SERIAL PRIMARY KEY,
+      user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+      game_id INT REFERENCES pickem_games(id) ON DELETE CASCADE,
+      picked_team VARCHAR(3) NOT NULL,
+      is_correct BOOLEAN,
+      submitted_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW(),
+      UNIQUE(user_id, game_id)
+    )
+  `);
+  await runMigration('pickem_picks_user_idx', `CREATE INDEX IF NOT EXISTS idx_pickem_picks_user ON pickem_picks(user_id)`);
+  await runMigration('pickem_picks_game_idx', `CREATE INDEX IF NOT EXISTS idx_pickem_picks_game ON pickem_picks(game_id)`);
+
+  await runMigration('pickem_tiebreakers_table', `
+    CREATE TABLE IF NOT EXISTS pickem_tiebreakers (
+      id SERIAL PRIMARY KEY,
+      user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+      week_id INT REFERENCES pickem_weeks(id) ON DELETE CASCADE,
+      guessed_total_goals INT NOT NULL CHECK (guessed_total_goals >= 0),
+      actual_total_goals INT,
+      submitted_at TIMESTAMPTZ DEFAULT NOW(),
+      UNIQUE(user_id, week_id)
+    )
+  `);
+
+  await runMigration('pickem_groups_table', `
+    CREATE TABLE IF NOT EXISTS pickem_groups (
+      id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+      name VARCHAR(100) NOT NULL,
+      description TEXT,
+      code VARCHAR(8) UNIQUE NOT NULL,
+      is_private BOOLEAN DEFAULT TRUE,
+      owner_id UUID REFERENCES users(id) ON DELETE CASCADE,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+  await runMigration('pickem_groups_code_idx', `CREATE INDEX IF NOT EXISTS idx_pickem_groups_code ON pickem_groups(UPPER(code))`);
+  await runMigration('pickem_groups_updated_at_trigger_drop', `DROP TRIGGER IF EXISTS update_pickem_groups_updated_at ON pickem_groups`);
+  await runMigration('pickem_groups_updated_at_trigger_add',  `CREATE TRIGGER update_pickem_groups_updated_at BEFORE UPDATE ON pickem_groups FOR EACH ROW EXECUTE FUNCTION update_updated_at_column()`);
+
+  await runMigration('pickem_group_members_table', `
+    CREATE TABLE IF NOT EXISTS pickem_group_members (
+      id SERIAL PRIMARY KEY,
+      group_id UUID REFERENCES pickem_groups(id) ON DELETE CASCADE,
+      user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+      joined_at TIMESTAMPTZ DEFAULT NOW(),
+      UNIQUE(group_id, user_id)
+    )
+  `);
+
+  await runMigration('pickem_leaderboard_view', `
+    CREATE OR REPLACE VIEW pickem_leaderboard AS
+    SELECT
+      u.id AS user_id,
+      u.username,
+      COUNT(*) FILTER (WHERE pp.is_correct = true) AS total_correct,
+      COUNT(*) FILTER (WHERE pp.is_correct IS NOT NULL) AS total_graded
+    FROM users u
+    JOIN pickem_picks pp ON pp.user_id = u.id
+    GROUP BY u.id, u.username
+    ORDER BY total_correct DESC
+  `);
+
+  console.log('✓ Pickem schema migrations complete');
+
   console.log('✓ Schema migrations complete');
 }
 
@@ -157,7 +262,9 @@ const rostersRoutes = require('./routes/rosters');
 const groupsRoutes = require('./routes/groups');
 const standingsRoutes = require('./routes/standings');
 const adminRoutes = require('./routes/admin');
+const pickemRoutes = require('./routes/pickem');
 const { setupScheduledJobs } = require('./jobs/fetchStats');
+const { setupPickemJobs } = require('./jobs/fetchPickemData');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -206,6 +313,7 @@ app.use('/api/rosters', rostersRoutes);
 app.use('/api/groups', groupsRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/standings', standingsRoutes);
+app.use('/api/pickem', pickemRoutes);
 
 // Error handling
 app.use((err, req, res, next) => {
@@ -235,9 +343,11 @@ runSchemaMigrations().then(() => {
     // Setup scheduled jobs for stats fetching
     if (process.env.NODE_ENV === 'production') {
       setupScheduledJobs();
+      setupPickemJobs();
     } else {
       console.log('ℹ Scheduled jobs disabled in development mode');
       console.log('  Run "npm run fetch-stats" manually to update stats');
+      console.log('  Run "npm run fetch-pickem" manually to sync Saturday pickem data');
     }
 
     // Async background backfill — fill in any missing headshot URLs
