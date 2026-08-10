@@ -155,8 +155,24 @@ const TeamLogo = ({ abbrev, className }) => (
 function formatGameTime(iso) {
   return new Date(iso).toLocaleTimeString('en-US', { timeZone: 'America/Toronto', hour: 'numeric', minute: '2-digit' }) + ' ET';
 }
-function formatGameDate(iso) {
-  return new Date(iso).toLocaleDateString('en-US', { timeZone: 'America/Toronto', weekday: 'long', month: 'long', day: 'numeric' });
+
+const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+
+// week_date comes back from the API as a full UTC timestamp (Postgres DATE columns
+// serialize as midnight UTC), e.g. "2026-10-03T00:00:00.000Z". Parsing that with the
+// browser's local timezone can roll it back a calendar day for anyone west of UTC, so
+// we pull the Y-M-D straight out of the string instead of going through a Date object.
+function weekDateParts(weekDateStr) {
+  const [y, m, d] = weekDateStr.slice(0, 10).split('-').map(Number);
+  return { y, m, d };
+}
+function formatWeekLabel(weekDateStr) {
+  const { m, d } = weekDateParts(weekDateStr);
+  return `${MONTH_NAMES[m - 1]} ${d}`;
+}
+function formatWeekHeading(weekDateStr) {
+  const { y, m, d } = weekDateParts(weekDateStr);
+  return `Saturday, ${MONTH_NAMES[m - 1]} ${d}, ${y}`;
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -305,9 +321,12 @@ const PicksPage = ({ showToast }) => {
   const [weekId, setWeekId] = useState(null);
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
+  const hasLoadedOnce = React.useRef(false);
 
+  // Only show the full-page spinner on the very first load. Switching weeks or
+  // re-syncing after a pick shouldn't blank out content the user is looking at.
   const loadWeek = useCallback(async (id) => {
-    setLoading(true);
+    if (!hasLoadedOnce.current) setLoading(true);
     try {
       const result = id ? await api.getWeek(id) : await api.getCurrentWeek();
       setData(result);
@@ -315,6 +334,7 @@ const PicksPage = ({ showToast }) => {
     } catch (err) {
       showToast(err.message, 'error');
     } finally {
+      hasLoadedOnce.current = true;
       setLoading(false);
     }
   }, [showToast]);
@@ -324,12 +344,16 @@ const PicksPage = ({ showToast }) => {
     loadWeek(null);
   }, [loadWeek]);
 
+  // Picking updates local state directly instead of re-fetching the whole week —
+  // no round trip, no flash, and the button reflects the pick instantly.
   const handlePick = async (gameId, team) => {
     if (!user) { showToast('Sign in to make picks', 'error'); return; }
     try {
       await api.submitPick(gameId, team);
-      await loadWeek(weekId);
-      showToast('Pick saved', 'success');
+      setData(prev => ({
+        ...prev,
+        games: prev.games.map(g => g.id === gameId ? { ...g, myPick: team, myPickCorrect: null } : g)
+      }));
     } catch (err) {
       showToast(err.message, 'error');
     }
@@ -338,7 +362,7 @@ const PicksPage = ({ showToast }) => {
   const handleTiebreaker = async (goals) => {
     try {
       await api.submitTiebreaker(weekId, goals);
-      await loadWeek(weekId);
+      setData(prev => ({ ...prev, myTiebreaker: { ...prev.myTiebreaker, guessed_total_goals: goals } }));
       showToast('Tiebreaker saved', 'success');
     } catch (err) {
       showToast(err.message, 'error');
@@ -355,10 +379,10 @@ const PicksPage = ({ showToast }) => {
   return (
     <div className="max-w-3xl mx-auto px-4 py-8">
       <div className="flex flex-wrap items-center justify-between gap-3 mb-6">
-        <h2 className="text-2xl font-black text-white">{formatGameDate(data.week.week_date + 'T18:00:00')}</h2>
+        <h2 className="text-2xl font-black text-white">{formatWeekHeading(data.week.week_date)}</h2>
         {weeks.length > 1 && (
           <select value={weekId || ''} onChange={e => loadWeek(e.target.value)} className="bg-slate-700 text-white rounded-lg px-3 py-2">
-            {weeks.map(w => <option key={w.id} value={w.id}>{w.week_date}{w.is_finalized ? ' (final)' : ''}</option>)}
+            {weeks.map(w => <option key={w.id} value={w.id}>{formatWeekLabel(w.week_date)}{w.is_finalized ? ' (final)' : ''}</option>)}
           </select>
         )}
       </div>
@@ -577,7 +601,7 @@ const GroupDetailPage = ({ groupId, showToast, onBack }) => {
         <h3 className="text-lg font-bold text-white">Weekly Standings</h3>
         {weeks.length > 1 && (
           <select value={weekId || ''} onChange={e => setWeekId(Number(e.target.value))} className="bg-slate-700 text-white rounded-lg px-3 py-2">
-            {weeks.map(w => <option key={w.id} value={w.id}>{w.week_date}{w.is_finalized ? ' (final)' : ''}</option>)}
+            {weeks.map(w => <option key={w.id} value={w.id}>{formatWeekLabel(w.week_date)}{w.is_finalized ? ' (final)' : ''}</option>)}
           </select>
         )}
       </div>
@@ -749,7 +773,7 @@ const AdminPage = ({ showToast }) => {
 
       {data?.week && (
         <div className="space-y-3">
-          <h3 className="text-white font-bold">{data.week.week_date} — Games</h3>
+          <h3 className="text-white font-bold">{formatWeekHeading(data.week.week_date)}</h3>
           {data.games.map(g => (
             <div key={g.id} className="bg-slate-800 rounded-xl p-4">
               <div className="text-gray-300 text-sm mb-2">{g.away_team} @ {g.home_team} — {formatGameTime(g.start_time)} {g.is_tiebreaker_game && '(tiebreaker game)'}</div>
