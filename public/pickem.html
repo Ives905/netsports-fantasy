@@ -244,8 +244,14 @@ const GameCard = ({ game, onPick, picking }) => {
             : <span className="bg-emerald-700 text-white text-xs font-bold px-2 py-1 rounded">OPEN</span>)}
         </div>
       </div>
+      <div className="text-center text-gray-500 text-xs font-semibold uppercase tracking-wide mb-2">
+        {game.away_team} @ {game.home_team}
+      </div>
       <div className="grid grid-cols-2 gap-3">
-        {[game.away_team, game.home_team].map(team => {
+        {[
+          { team: game.away_team, venue: 'Away' },
+          { team: game.home_team, venue: 'Home' }
+        ].map(({ team, venue }) => {
           const picked = myPick === team;
           const won = isFinal && game.winner === team;
           const lost = isFinal && game.winner && game.winner !== team;
@@ -260,6 +266,7 @@ const GameCard = ({ game, onPick, picking }) => {
                 ${lost && picked ? 'border-red-500 bg-red-900/50' : ''}
                 ${game.locked || isPostponed ? 'cursor-default' : 'hover:border-slate-500 cursor-pointer'}`}
             >
+              <span className="text-[10px] font-bold uppercase tracking-wide text-gray-400">{venue}</span>
               <TeamLogo abbrev={team} className="w-12 h-12 object-contain" />
               <span className="text-white font-bold text-sm">{team}</span>
               {isFinal && (
