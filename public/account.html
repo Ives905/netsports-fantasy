@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>My Account - NetSports Fantasy</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <style>
+    body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .animate-spin { animation: spin 1s linear infinite; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="text/babel">
+const { useState, useEffect, createContext, useContext } = React;
+
+const API_URL = '/api';
+
+const api = {
+  token: localStorage.getItem('netsports-token'),
+  setToken(token) {
+    this.token = token;
+    if (token) localStorage.setItem('netsports-token', token);
+    else localStorage.removeItem('netsports-token');
+  },
+  async request(endpoint, options = {}) {
+    const headers = { 'Content-Type': 'application/json', ...options.headers };
+    if (this.token) headers['Authorization'] = `Bearer ${this.token}`;
+    const response = await fetch(`${API_URL}${endpoint}`, { ...options, headers });
+    const contentType = response.headers.get('content-type') || '';
+    if (!contentType.includes('application/json')) {
+      throw new Error(`Server returned non-JSON response for ${endpoint} (status ${response.status})`);
+    }
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || 'Request failed');
+    return data;
+  },
+  async getMe() { return this.request('/auth/me'); },
+  async changePassword(currentPassword, newPassword) {
+    return this.request('/auth/password', { method: 'PUT', body: JSON.stringify({ currentPassword, newPassword }) });
+  },
+  logout() { this.setToken(null); }
+};
+
+const AuthContext = createContext(null);
+function AuthProvider({ children }) {
+  const [user, setUser] = useState(null);
+  const [loading, setLoading] = useState(true);
+  useEffect(() => {
+    if (api.token) {
+      api.getMe().then(data => setUser(data.user)).catch(() => api.logout()).finally(() => setLoading(false));
+    } else {
+      setLoading(false);
+    }
+  }, []);
+  const logout = () => { api.logout(); setUser(null); };
+  return <AuthContext.Provider value={{ user, logout, loading }}>{children}</AuthContext.Provider>;
+}
+const useAuth = () => useContext(AuthContext);
+
+const Toast = ({ message, type, onClose }) => {
+  useEffect(() => { const t = setTimeout(onClose, 3000); return () => clearTimeout(t); }, [onClose]);
+  return <div className={`fixed bottom-4 right-4 px-6 py-3 rounded-lg shadow-lg z-50 text-white font-medium ${type === 'success' ? 'bg-emerald-600' : 'bg-red-600'}`}>{message}</div>;
+};
+
+const LoadingSpinner = () => (
+  <div className="flex items-center justify-center p-8">
+    <div className="w-8 h-8 border-4 border-red-600 border-t-transparent rounded-full animate-spin"></div>
+  </div>
+);
+
+const POOL_LINKS = [
+  { label: 'Playoff Pickem Pool', href: '/draftpool.html' },
+  { label: 'Saturday Night Pickem', href: '/pickem.html' }
+];
+const GROUP_LINKS = [
+  { label: 'Playoff Pickem Pool Groups', href: '/draftpool.html?page=groups' },
+  { label: 'Saturday Night Pickem Groups', href: '/pickem.html?page=groups' }
+];
+const RULES_LINKS = [
+  { label: 'Playoff Pickem Pool Rules', href: '/draftpool.html?page=rules' },
+  { label: 'Saturday Night Pickem Rules', href: '/pickem.html?page=rules' }
+];
+
+const NavDropdown = ({ label, items }) => {
+  const [open, setOpen] = useState(false);
+  const ref = React.useRef(null);
+  useEffect(() => {
+    const handler = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
+  return (
+    <div className="relative" ref={ref}>
+      <button onClick={() => setOpen(o => !o)}
+        className="px-4 py-2 font-bold text-sm uppercase text-gray-300 hover:bg-slate-700 rounded-t-lg flex items-center gap-1">
+        {label} <span className="text-xs">▾</span>
+      </button>
+      {open && (
+        <div className="absolute left-0 top-full mt-0.5 bg-slate-800 border border-slate-700 rounded-lg shadow-2xl py-1 min-w-[240px] z-50">
+          {items.map(item => (
+            <a key={item.label} href={item.href} className="block px-4 py-2 text-sm text-gray-200 hover:bg-slate-700 hover:text-white">{item.label}</a>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
+const Nav = ({ user, logout }) => (
+  <nav className="bg-slate-900 border-b-4 border-red-600 sticky top-0 z-40">
+    <div className="max-w-5xl mx-auto px-4 flex items-center justify-between h-16">
+      <a href="/" className="flex items-center gap-2">
+        <span className="text-3xl">🏒</span>
+        <span className="text-white font-black text-xl">NET<span className="text-red-500">SPORTS</span></span>
+      </a>
+      <div className="hidden md:flex items-center gap-1">
+        <a href="/" className="px-4 py-2 font-bold text-sm uppercase text-gray-300 hover:bg-slate-700 rounded-t-lg">Home</a>
+        <NavDropdown label="Pools" items={POOL_LINKS} />
+        <NavDropdown label="Rules" items={RULES_LINKS} />
+        <NavDropdown label="Groups" items={GROUP_LINKS} />
+        <span className="px-4 py-2 font-bold text-sm uppercase text-white bg-red-600 rounded-t-lg">My Account</span>
+      </div>
+      {user && (
+        <div className="flex items-center gap-2">
+          <span className="text-white font-semibold hidden sm:block">{user.username}</span>
+          <button onClick={logout} className="text-gray-400 hover:text-white text-sm">Logout</button>
+        </div>
+      )}
+    </div>
+  </nav>
+);
+
+const ChangePasswordForm = ({ showToast }) => {
+  const [form, setForm] = useState({ currentPassword: '', newPassword: '', confirmPassword: '' });
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+
+  const submit = async (e) => {
+    e.preventDefault();
+    setError('');
+    if (form.newPassword.length < 6) { setError('New password must be at least 6 characters'); return; }
+    if (form.newPassword !== form.confirmPassword) { setError("New passwords don't match"); return; }
+    setBusy(true);
+    try {
+      await api.changePassword(form.currentPassword, form.newPassword);
+      showToast('Password updated', 'success');
+      setForm({ currentPassword: '', newPassword: '', confirmPassword: '' });
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <form onSubmit={submit} className="space-y-3">
+      <input type="password" placeholder="Current password" value={form.currentPassword}
+        onChange={e => setForm({ ...form, currentPassword: e.target.value })}
+        className="w-full bg-slate-700 text-white rounded-lg px-3 py-2" required />
+      <input type="password" placeholder="New password" value={form.newPassword}
+        onChange={e => setForm({ ...form, newPassword: e.target.value })}
+        className="w-full bg-slate-700 text-white rounded-lg px-3 py-2" required />
+      <input type="password" placeholder="Confirm new password" value={form.confirmPassword}
+        onChange={e => setForm({ ...form, confirmPassword: e.target.value })}
+        className="w-full bg-slate-700 text-white rounded-lg px-3 py-2" required />
+      {error && <div className="text-red-400 text-sm">{error}</div>}
+      <button disabled={busy} className="bg-red-600 hover:bg-red-500 disabled:opacity-50 text-white px-4 py-2 rounded-lg font-bold">
+        {busy ? 'Saving...' : 'Change Password'}
+      </button>
+    </form>
+  );
+};
+
+function AppContent() {
+  const { user, loading, logout } = useAuth();
+  const [toast, setToast] = useState(null);
+  const showToast = (message, type = 'success') => setToast({ message, type });
+
+  if (loading) return <LoadingSpinner />;
+
+  return (
+    <div className="min-h-screen bg-slate-950">
+      <Nav user={user} logout={logout} />
+
+      <div className="max-w-2xl mx-auto px-4 py-10">
+        {!user ? (
+          <div className="bg-slate-800 rounded-xl p-8 text-center">
+            <h2 className="text-xl font-bold text-white mb-2">Sign in to view your account</h2>
+            <p className="text-gray-400 mb-4">Head to the home page and sign in — one account works across both pools.</p>
+            <a href="/" className="inline-block bg-red-600 hover:bg-red-500 text-white px-6 py-3 rounded-lg font-bold">Go Home</a>
+          </div>
+        ) : (
+          <>
+            <h1 className="text-2xl font-black text-white mb-6">My Account</h1>
+
+            <div className="bg-slate-800 rounded-xl p-5 mb-6">
+              <h3 className="text-white font-bold mb-3">Account Info</h3>
+              <div className="text-gray-300 text-sm space-y-1">
+                <div><span className="text-gray-500">Username:</span> {user.username}</div>
+                <div><span className="text-gray-500">Email:</span> {user.email}</div>
+                {user.created_at && (
+                  <div><span className="text-gray-500">Member since:</span> {new Date(user.created_at).toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}</div>
+                )}
+              </div>
+              <p className="text-gray-500 text-xs mt-3">This account works for both the Playoff Pickem Pool and Saturday Night Pickem — one login, everywhere.</p>
+            </div>
+
+            <div className="bg-slate-800 rounded-xl p-5 mb-6">
+              <h3 className="text-white font-bold mb-3">Change Password</h3>
+              <ChangePasswordForm showToast={showToast} />
+            </div>
+
+            <div className="bg-slate-800 rounded-xl p-5">
+              <h3 className="text-white font-bold mb-3">Your Pools</h3>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {POOL_LINKS.map(item => (
+                  <a key={item.label} href={item.href} className="block bg-slate-700 hover:bg-slate-600 rounded-lg p-4 text-white font-semibold text-center">{item.label}</a>
+                ))}
+              </div>
+            </div>
+
+            <button onClick={logout} className="mt-6 text-gray-400 hover:text-white text-sm">Sign out</button>
+          </>
+        )}
+      </div>
+
+      {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
+    </div>
+  );
+}
+
+function App() {
+  return <AuthProvider><AppContent /></AuthProvider>;
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+  </script>
+</body>
+</html>

@@ -178,6 +178,79 @@ function formatWeekHeading(weekDateStr) {
 }
 
 // ─────────────────────────────────────────────────────────────
+// Cross-pool nav — identical list on every page (this one, the draft pool,
+// and the neutral home page) so the two sites always link to each other.
+// ─────────────────────────────────────────────────────────────
+const POOL_LINKS = [
+  { label: 'Playoff Pickem Pool', href: '/draftpool.html' },
+  { label: 'Saturday Night Pickem', href: '/pickem.html' }
+];
+const GROUP_LINKS = [
+  { label: 'Playoff Pickem Pool Groups', href: '/draftpool.html?page=groups' },
+  { label: 'Saturday Night Pickem Groups', href: '/pickem.html?page=groups' }
+];
+
+const NavDropdown = ({ label, items }) => {
+  const [open, setOpen] = useState(false);
+  const ref = React.useRef(null);
+  useEffect(() => {
+    const handler = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
+  return (
+    <div className="relative" ref={ref}>
+      <button onClick={() => setOpen(o => !o)}
+        className="px-4 py-2 font-bold text-sm uppercase text-gray-300 hover:bg-slate-700 rounded-t-lg flex items-center gap-1">
+        {label} <span className="text-xs">▾</span>
+      </button>
+      {open && (
+        <div className="absolute left-0 top-full mt-0.5 bg-slate-800 border border-slate-700 rounded-lg shadow-2xl py-1 min-w-[240px] z-50">
+          {items.map(item => (
+            <a key={item.label} href={item.href} className="block px-4 py-2 text-sm text-gray-200 hover:bg-slate-700 hover:text-white">{item.label}</a>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
+// ─────────────────────────────────────────────────────────────
+// Rules
+// ─────────────────────────────────────────────────────────────
+const RulesPage = () => (
+  <div className="max-w-3xl mx-auto px-4 py-8 text-gray-200">
+    <h2 className="text-2xl font-black text-white mb-6">Saturday Night Pickem — Rules</h2>
+    <div className="space-y-6">
+      <div className="bg-slate-800 rounded-xl p-5">
+        <h3 className="text-white font-bold mb-2">How picks work</h3>
+        <p>Every Saturday during the NHL regular season, pick the winner of every game on the schedule that night — straight up, no point spread. One point for every correct pick.</p>
+      </div>
+      <div className="bg-slate-800 rounded-xl p-5">
+        <h3 className="text-white font-bold mb-2">Deadlines</h3>
+        <p>Each game locks separately, right at its own scheduled start time — a 1:00 PM EST game locks at 1:00 PM EST, a 10:00 PM EST game locks at 10:00 PM EST. You can change a pick anytime before that game's puck drop. Once a game starts, that pick is final. All times on the site are shown in Eastern Time.</p>
+      </div>
+      <div className="bg-slate-800 rounded-xl p-5">
+        <h3 className="text-white font-bold mb-2">Tiebreaker</h3>
+        <p>Each week's tiebreaker is the combined final score (both teams' goals added together) of the last game to start that Saturday night. Guess the total before that game locks. It's only used to break ties in that week's standings — season-long standings are just your total correct picks.</p>
+      </div>
+      <div className="bg-slate-800 rounded-xl p-5">
+        <h3 className="text-white font-bold mb-2">Weekly &amp; season standings</h3>
+        <p>The weekly winner in your group is whoever has the most correct picks that Saturday (tiebreaker guess breaks ties). Season standings are the running total of correct picks across every Saturday so far.</p>
+      </div>
+      <div className="bg-slate-800 rounded-xl p-5">
+        <h3 className="text-white font-bold mb-2">Postponed or cancelled games</h3>
+        <p>If a game gets postponed or cancelled after picks are made, it's simply excluded from scoring that week — nobody gains or loses a point for it.</p>
+      </div>
+      <div className="bg-slate-800 rounded-xl p-5">
+        <h3 className="text-white font-bold mb-2">Groups</h3>
+        <p>Join or create a group to compete with friends — public groups anyone can join, or private groups by invite code. You can be in more than one group at a time.</p>
+      </div>
+    </div>
+  </div>
+);
+
+// ─────────────────────────────────────────────────────────────
 // Auth modal (login / register)
 // ─────────────────────────────────────────────────────────────
 const AuthModal = ({ state, onClose, showToast }) => {
@@ -811,14 +884,18 @@ const AdminPage = ({ showToast }) => {
 // ─────────────────────────────────────────────────────────────
 function AppContent() {
   const { user, loading, logout } = useAuth();
-  const [page, setPage] = useState('picks');
+  const getInitialPage = () => {
+    const requested = new URLSearchParams(window.location.search).get('page');
+    return ['picks', 'rules', 'groups', 'standings'].includes(requested) ? requested : 'picks';
+  };
+  const [page, setPage] = useState(getInitialPage);
   const [activeGroupId, setActiveGroupId] = useState(null);
   const [authModal, setAuthModal] = useState({ open: false, mode: 'login' });
   const [toast, setToast] = useState(null);
 
   const showToast = (message, type = 'success') => setToast({ message, type });
 
-  const navItems = ['picks', 'groups', 'standings'];
+  const navItems = ['picks', 'rules', 'standings'];
   if (isAdmin(user)) navItems.push('admin');
 
   if (loading) return <LoadingSpinner />;
@@ -833,14 +910,17 @@ function AppContent() {
               SATURDAY NIGHT<br /><span className="text-red-500 text-sm">PICKEM</span>
             </span>
           </div>
-          <div className="hidden md:flex gap-1">
+          <div className="hidden md:flex items-center gap-1">
+            <a href="/" className="px-4 py-2 font-bold text-sm uppercase text-gray-300 hover:bg-slate-700 rounded-t-lg">Home</a>
             {navItems.map(p => (
               <button key={p} onClick={() => { setPage(p); setActiveGroupId(null); }}
                 className={`px-4 py-2 font-bold text-sm uppercase ${page === p ? 'bg-red-600 text-white' : 'text-gray-300 hover:bg-slate-700'} rounded-t-lg`}>
                 {p}
               </button>
             ))}
-            <a href="/" className="px-4 py-2 font-bold text-sm uppercase text-amber-400 hover:bg-slate-700 rounded-t-lg">Draft Pool ↗</a>
+            <NavDropdown label="Pools" items={POOL_LINKS} />
+            <NavDropdown label="Groups" items={GROUP_LINKS} />
+            <a href="/account.html" className="px-4 py-2 font-bold text-sm uppercase text-gray-300 hover:bg-slate-700 rounded-t-lg">My Account</a>
           </div>
           <div className="flex items-center gap-3">
             {user ? (
@@ -857,17 +937,25 @@ function AppContent() {
           </div>
         </div>
         <div className="md:hidden flex overflow-x-auto px-2 pb-2 gap-1">
+          <a href="/" className="px-3 py-1.5 whitespace-nowrap font-bold text-xs uppercase rounded-lg text-gray-300 bg-slate-800">Home</a>
           {navItems.map(p => (
             <button key={p} onClick={() => { setPage(p); setActiveGroupId(null); }}
               className={`px-3 py-1.5 whitespace-nowrap font-bold text-xs uppercase rounded-lg ${page === p ? 'bg-red-600 text-white' : 'text-gray-300 bg-slate-800'}`}>
               {p}
             </button>
           ))}
-          <a href="/" className="px-3 py-1.5 whitespace-nowrap font-bold text-xs uppercase rounded-lg text-amber-400 bg-slate-800">Draft Pool ↗</a>
+          {POOL_LINKS.map(item => (
+            <a key={item.label} href={item.href} className="px-3 py-1.5 whitespace-nowrap font-bold text-xs uppercase rounded-lg text-gray-300 bg-slate-800">{item.label}</a>
+          ))}
+          {GROUP_LINKS.map(item => (
+            <a key={item.label} href={item.href} className="px-3 py-1.5 whitespace-nowrap font-bold text-xs uppercase rounded-lg text-gray-300 bg-slate-800">{item.label}</a>
+          ))}
+          <a href="/account.html" className="px-3 py-1.5 whitespace-nowrap font-bold text-xs uppercase rounded-lg text-gray-300 bg-slate-800">My Account</a>
         </div>
       </nav>
 
       {page === 'picks' && <PicksPage showToast={showToast} />}
+      {page === 'rules' && <RulesPage />}
       {page === 'groups' && !activeGroupId && <GroupsPage showToast={showToast} openGroup={setActiveGroupId} />}
       {page === 'groups' && activeGroupId && <GroupDetailPage groupId={activeGroupId} showToast={showToast} onBack={() => setActiveGroupId(null)} />}
       {page === 'standings' && <StandingsPage showToast={showToast} />}
