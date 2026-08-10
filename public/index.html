@@ -187,13 +187,31 @@ const AuthModal = ({ state, onClose, showToast }) => {
   );
 };
 
-const PoolCard = ({ emoji, name, description, href, accent }) => (
-  <a href={href} className="block bg-slate-800 hover:bg-slate-700 transition rounded-2xl p-6 border-2 border-slate-700 hover:border-slate-500">
-    <div className="text-4xl mb-3">{emoji}</div>
-    <h3 className={`text-xl font-black mb-2 ${accent}`}>{name}</h3>
-    <p className="text-gray-400 text-sm mb-4">{description}</p>
-    <span className="text-sm font-bold text-white">Go to pool →</span>
+const PoolButton = ({ emoji, name, href, accent }) => (
+  <a href={href} className="flex items-center gap-3 bg-slate-800 hover:bg-slate-700 transition rounded-xl px-5 py-3 border-2 border-slate-700 hover:border-slate-500">
+    <span className="text-2xl">{emoji}</span>
+    <span className={`font-black ${accent}`}>{name}</span>
+    <span className="text-gray-500 ml-1">→</span>
   </a>
+);
+
+const InfoStep = ({ number, title, children }) => (
+  <div className="bg-slate-800 rounded-xl p-5">
+    <div className="w-8 h-8 rounded-full bg-red-600 text-white font-black flex items-center justify-center mb-3">{number}</div>
+    <h3 className="text-white font-bold mb-2">{title}</h3>
+    <p className="text-gray-400 text-sm">{children}</p>
+  </div>
+);
+
+const PoolInfoCard = ({ emoji, name, accent, href, children }) => (
+  <div className="bg-slate-800 rounded-xl p-6">
+    <div className="flex items-center gap-2 mb-3">
+      <span className="text-2xl">{emoji}</span>
+      <h3 className={`text-lg font-black ${accent}`}>{name}</h3>
+    </div>
+    <p className="text-gray-400 text-sm mb-4">{children}</p>
+    <a href={href} className="text-sm font-bold text-white hover:text-gray-300">Go to pool →</a>
+  </div>
 );
 
 function AppContent() {
@@ -256,29 +274,45 @@ function AppContent() {
         )}
       </nav>
 
-      <div className="max-w-5xl mx-auto px-4 py-12">
-        <div className="text-center mb-12">
+      <div className="max-w-4xl mx-auto px-4 py-12">
+        <div className="text-center mb-6">
           <h1 className="text-3xl md:text-5xl font-black text-white mb-4">NetSports Fantasy</h1>
           <p className="text-gray-400 text-lg max-w-2xl mx-auto">
-            Two ways to play NHL hockey pools with your friends and family — pick your favourite, or play both.
+            NHL hockey pools for friends and family — run by fans, for fans.
           </p>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-12">
-          <PoolCard
-            emoji="🏆"
-            name="Playoff Pickem Pool"
-            description="Draft a roster under a salary cap before each playoff round, pick your stars, and climb the leaderboard as your players rack up points."
-            href="/draftpool.html"
-            accent="text-red-500"
-          />
-          <PoolCard
-            emoji="🗓️"
-            name="Saturday Night Pickem"
-            description="Every Saturday of the regular season, pick the winner of every NHL game and guess the tiebreaker. Most correct picks wins the week."
-            href="/pickem.html"
-            accent="text-amber-400"
-          />
+        <div className="flex flex-wrap items-center justify-center gap-3 mb-16">
+          <PoolButton emoji="🏆" name="Playoff Pickem Pool" href="/draftpool.html" accent="text-red-500" />
+          <PoolButton emoji="🗓️" name="Saturday Night Pickem" href="/pickem.html" accent="text-amber-400" />
+        </div>
+
+        <div className="mb-16">
+          <h2 className="text-2xl font-black text-white text-center mb-8">How It Works</h2>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <InfoStep number="1" title="Sign Up">
+              Create one free account. It works across both pools — no need to register twice.
+            </InfoStep>
+            <InfoStep number="2" title="Join or Create a Group">
+              Play with your own group of friends and family using an invite code, or join a public group open to everyone.
+            </InfoStep>
+            <InfoStep number="3" title="Compete Every Week">
+              Make your picks, track your rank on the leaderboard, and see who comes out on top.
+            </InfoStep>
+          </div>
+        </div>
+
+        <div className="mb-16">
+          <h2 className="text-2xl font-black text-white text-center mb-2">Two Pools, Two Ways to Play</h2>
+          <p className="text-gray-400 text-center mb-8 max-w-xl mx-auto">Play one, or play both — they run independently, so your picks in one never affect the other.</p>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <PoolInfoCard emoji="🏆" name="Playoff Pickem Pool" accent="text-red-500" href="/draftpool.html">
+              Draft a roster under a salary cap before each playoff round, designate your star players for double points, and climb the leaderboard as your team racks up points through the playoffs.
+            </PoolInfoCard>
+            <PoolInfoCard emoji="🗓️" name="Saturday Night Pickem" accent="text-amber-400" href="/pickem.html">
+              Every Saturday during the regular season, pick the winner of every NHL game on the schedule and guess the tiebreaker. Whoever gets the most picks right that week wins — plus a season-long leaderboard.
+            </PoolInfoCard>
+          </div>
         </div>
 
         {!user && (
