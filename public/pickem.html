@@ -152,8 +152,10 @@ const TeamLogo = ({ abbrev, className }) => (
   />
 );
 
+// Times are always shown in Eastern Time regardless of the viewer's own location —
+// matches how NHL broadcasts list game times, so everyone's talking about the same clock.
 function formatGameTime(iso) {
-  return new Date(iso).toLocaleTimeString('en-US', { timeZone: 'America/Toronto', hour: 'numeric', minute: '2-digit' }) + ' ET';
+  return new Date(iso).toLocaleTimeString('en-US', { timeZone: 'America/Toronto', hour: 'numeric', minute: '2-digit' }) + ' EST';
 }
 
 const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
@@ -386,7 +388,10 @@ const PicksPage = ({ showToast }) => {
   return (
     <div className="max-w-3xl mx-auto px-4 py-8">
       <div className="flex flex-wrap items-center justify-between gap-3 mb-6">
-        <h2 className="text-2xl font-black text-white">{formatWeekHeading(data.week.week_date)}</h2>
+        <div>
+          <h2 className="text-2xl font-black text-white">{formatWeekHeading(data.week.week_date)}</h2>
+          <p className="text-gray-500 text-xs mt-1">All game times shown are Eastern Time (EST).</p>
+        </div>
         {weeks.length > 1 && (
           <select value={weekId || ''} onChange={e => loadWeek(e.target.value)} className="bg-slate-700 text-white rounded-lg px-3 py-2">
             {weeks.map(w => <option key={w.id} value={w.id}>{formatWeekLabel(w.week_date)}{w.is_finalized ? ' (final)' : ''}</option>)}
