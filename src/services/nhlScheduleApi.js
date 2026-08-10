@@ -125,6 +125,45 @@ class NHLScheduleService {
   }
 
   /**
+   * Every Saturday date (YYYY-MM-DD) from startDate through endDate, inclusive.
+   * Used to pre-populate a whole season's worth of weeks in one pass.
+   */
+  getSaturdaysInRange(startDateStr, endDateStr) {
+    const dates = [];
+    const cursor = new Date(`${startDateStr}T12:00:00Z`);
+    const end = new Date(`${endDateStr}T12:00:00Z`);
+    // Advance to the first Saturday on/after startDate (UTC day-of-week is fine here
+    // since we only use this to enumerate calendar dates, not to compute lock times).
+    while (cursor.getUTCDay() !== 6) cursor.setUTCDate(cursor.getUTCDate() + 1);
+    while (cursor <= end) {
+      dates.push(cursor.toISOString().slice(0, 10));
+      cursor.setUTCDate(cursor.getUTCDate() + 7);
+    }
+    return dates;
+  }
+
+  /**
+   * Pre-populate every Saturday of the season in one pass, using the NHL's own
+   * published schedule (available months ahead of time). Safe to re-run — same
+   * idempotent upserts as syncWeek. A short delay between calls is polite to the
+   * NHL API, matching the pattern already used for bulk roster fetches.
+   */
+  async syncSeason(startDateStr, endDateStr, season) {
+    const saturdays = this.getSaturdaysInRange(startDateStr, endDateStr);
+    const results = [];
+    for (const dateStr of saturdays) {
+      try {
+        const result = await this.syncWeek(dateStr, season);
+        results.push({ date: dateStr, ...result });
+      } catch (error) {
+        results.push({ date: dateStr, error: error.message });
+      }
+      await new Promise(r => setTimeout(r, 300));
+    }
+    return results;
+  }
+
+  /**
    * Grade any picks/tiebreakers for games that have gone final since the last sync.
    * Idempotent — only touches rows that haven't been graded yet.
    */

@@ -577,6 +577,33 @@ router.post('/admin/sync', authenticateToken, verifyAdmin, async (req, res) => {
 });
 
 /**
+ * POST /api/pickem/admin/backfill-season
+ * Body: { startDate, endDate } (YYYY-MM-DD, optional — defaults to a full
+ * NHL regular season window). Pre-populates every Saturday's games in one
+ * pass using the NHL's own published schedule, so weeks are visible and
+ * pickable long before game night instead of only showing up the day before.
+ */
+router.post('/admin/backfill-season', authenticateToken, verifyAdmin, async (req, res) => {
+  try {
+    const startDate = req.body.startDate || '2026-10-01';
+    const endDate = req.body.endDate || '2027-04-10';
+    const season = process.env.NHL_SEASON || '20262027';
+
+    const results = await nhlScheduleApi.syncSeason(startDate, endDate, season);
+    const totalGames = results.reduce((sum, r) => sum + (r.gameCount || 0), 0);
+    const errors = results.filter(r => r.error);
+
+    res.json({
+      message: `Synced ${results.length} Saturdays, ${totalGames} games total${errors.length ? `, ${errors.length} errors` : ''}`,
+      results
+    });
+  } catch (error) {
+    console.error('Admin pickem season backfill error:', error);
+    res.status(500).json({ error: 'Backfill failed: ' + error.message });
+  }
+});
+
+/**
  * PATCH /api/pickem/admin/games/:gameId
  * Manual override for a game — status, scores. If status is set to 'final',
  * picks and the tiebreaker (if this is the tiebreaker game) get graded immediately.
